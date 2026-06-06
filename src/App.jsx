@@ -9,7 +9,6 @@ const STATUS_COLORS = { Running: "#22c55e", WIP: "#3b82f6", Complete: "#8b5cf6",
 const ROUTING_OPS = ["OP-10 Rec", "OP-20 JB-51", "OP-30 DR-31", "OP-40 VM-40", "OP-50 Grinding", "OP-60 Inspection", "OP-70 Dispatch"];
 
 // ─── SUPABASE SHIM ─────────────────────────────────────────────────────────
-// Replace SUPABASE_URL and SUPABASE_KEY with your actual values
 const SUPABASE_URL = "https://fsrknhittjbqtbersqjd.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZzcmtuaGl0dGpicXRiZXJzcWpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzA1ODAsImV4cCI6MjA5NjMwNjU4MH0.LxY1k1AfCTQpTxeVx-9RppYh4ESVP6kyNR8U3Y2Ng00";
 
@@ -39,9 +38,11 @@ const db = {
   async getUpdates(jobId) { return sbFetch(`job_updates?job_id=eq.${jobId}&select=*&order=created_at.desc`); },
   async addUpdate(update) { return sbFetch("job_updates", { method: "POST", body: JSON.stringify(update) }); },
   async getAllUpdates() { return sbFetch("job_updates?select=*&order=created_at.desc&limit=200"); },
+  async bulkInsertPO(rows) { return sbFetch("production_orders", { method: "POST", body: JSON.stringify(rows), prefer: "return=minimal" }); },
+  async bulkInsertRouting(rows) { return sbFetch("routing_master", { method: "POST", body: JSON.stringify(rows), prefer: "return=minimal" }); },
 };
 
-// ─── LOCAL DEMO STORE (when Supabase not configured) ──────────────────────
+// ─── LOCAL DEMO STORE ──────────────────────────────────────────────────────
 const DEMO_MODE = SUPABASE_URL.includes("YOUR_PROJECT");
 let localJobs = [
   { id: "j1", production_number: "100031646", material_number: "M161501", description: "Wheel head body for dia 50", quantity: "3 Nos", printed_date: "2025-06-01", start_date: "2025-06-02", end_date: "2025-06-10", routing: ["OP-10 Rec","OP-20 JB-51","OP-30 DR-31","OP-60 Inspection"], current_station: "JB-51", current_status: "Running", created_at: new Date().toISOString() },
@@ -61,12 +62,13 @@ const localDB = {
   async getUpdates(jobId) { return localUpdates.filter(u => u.job_id === jobId).sort((a,b) => new Date(b.created_at)-new Date(a.created_at)); },
   async addUpdate(update) { const u = { ...update, id: "u" + Date.now(), created_at: new Date().toISOString() }; localUpdates.unshift(u); return u; },
   async getAllUpdates() { return [...localUpdates].sort((a,b) => new Date(b.created_at)-new Date(a.created_at)); },
+  async bulkInsertPO(rows) { return rows; },
+  async bulkInsertRouting(rows) { return rows; },
 };
 const DATA = DEMO_MODE ? localDB : db;
 
-// ─── QR CODE GENERATOR (simple, no lib) ───────────────────────────────────
+// ─── QR CODE ───────────────────────────────────────────────────────────────
 function generateQRDataURL(text) {
-  // We'll use a public QR API via img src
   return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(text)}`;
 }
 
@@ -74,8 +76,7 @@ function generateQRDataURL(text) {
 function agingDays(startDate, endDate) {
   const start = new Date(startDate);
   const end = endDate ? new Date(endDate) : new Date();
-  const days = Math.floor((end - start) / 86400000);
-  return days;
+  return Math.floor((end - start) / 86400000);
 }
 function overdueDays(endDate) {
   const d = agingDays(endDate, null);
@@ -101,7 +102,7 @@ const S = {
   input: { background: "#111", border: "1px solid #333", borderRadius: 4, padding: "8px 12px", color: "#e8e2d4", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, width: "100%", boxSizing: "border-box" },
   select: { background: "#111", border: "1px solid #333", borderRadius: 4, padding: "8px 12px", color: "#e8e2d4", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, width: "100%", boxSizing: "border-box" },
   btn: (variant = "primary") => ({
-    background: variant === "primary" ? "#d4a853" : variant === "danger" ? "#7f1d1d" : "#222",
+    background: variant === "primary" ? "#d4a853" : variant === "danger" ? "#7f1d1d" : variant === "success" ? "#14532d" : "#222",
     color: variant === "primary" ? "#0f0f0f" : "#e8e2d4",
     border: variant === "ghost" ? "1px solid #333" : "none",
     borderRadius: 4, padding: "10px 18px", fontFamily: "'IBM Plex Mono', monospace",
@@ -153,7 +154,7 @@ function PasscodeGate({ onUnlock }) {
   );
 }
 
-// ─── QR SCANNER (HTML5) ────────────────────────────────────────────────────
+// ─── QR SCANNER ────────────────────────────────────────────────────────────
 function QRScanner({ onResult, onClose }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -372,7 +373,6 @@ function JobDetailPage({ job: initialJob, onBack }) {
           <span>DUE: {fmtDate(job.end_date)}</span>
         </div>
 
-        {/* Routing Progress */}
         <div style={{ marginTop: 14 }}>
           <div style={{ fontSize: 10, color: "#555", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>Routing Progress</div>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -517,7 +517,7 @@ function Dashboard() {
   );
 }
 
-// ─── JOB CARD CREATOR + PRINT ──────────────────────────────────────────────
+// ─── JOB CARD MANAGER ──────────────────────────────────────────────────────
 function JobCardManager() {
   const [jobs, setJobs] = useState([]);
   const [mode, setMode] = useState("list");
@@ -594,7 +594,6 @@ function JobCardManager() {
 // ─── PRINT VIEW ────────────────────────────────────────────────────────────
 function PrintView({ job, onClose }) {
   const qrUrl = generateQRDataURL(job.production_number);
-
   function print() { window.print(); }
 
   return (
@@ -667,59 +666,236 @@ function RoutingMaster() {
   );
 }
 
-// ─── SUPABASE SETUP HELPER ─────────────────────────────────────────────────
-function SetupHelper() {
-  const sql = `-- Run this in Supabase SQL Editor
-create table jobs (
-  id uuid primary key default gen_random_uuid(),
-  production_number text unique not null,
-  material_number text,
-  description text,
-  quantity text,
-  printed_date date,
-  start_date date,
-  end_date date,
-  routing text[],
-  current_station text,
-  current_status text default 'Pending',
-  last_updated timestamptz,
-  created_at timestamptz default now()
-);
+// ─── BULK IMPORT ───────────────────────────────────────────────────────────
+function BulkImport() {
+  const [activeTab, setActiveTab] = useState("po");
+  const [poRows, setPoRows] = useState(null);
+  const [rmRows, setRmRows] = useState(null);
+  const [poStatus, setPoStatus] = useState(null);
+  const [rmStatus, setRmStatus] = useState(null);
+  const [xlsxReady, setXlsxReady] = useState(false);
 
-create table job_updates (
-  id uuid primary key default gen_random_uuid(),
-  job_id uuid references jobs(id),
-  supervisor text,
-  station text,
-  status text,
-  notes text,
-  created_at timestamptz default now()
-);
+  useEffect(() => {
+    if (window.XLSX) { setXlsxReady(true); return; }
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+    s.onload = () => setXlsxReady(true);
+    document.head.appendChild(s);
+  }, []);
 
-alter table jobs enable row level security;
-alter table job_updates enable row level security;
+  const PO_COLS = [
+    { key: "order_no", label: "Order No", req: true },
+    { key: "material_no", label: "Material No", req: true },
+    { key: "description", label: "Description", req: false },
+    { key: "qty", label: "Qty", req: true, num: true },
+    { key: "uom", label: "UoM", req: false },
+    { key: "start_date", label: "Start Date", req: false },
+    { key: "end_date", label: "End Date", req: false },
+    { key: "status", label: "Status", req: false },
+  ];
 
-create policy "public_read_write" on jobs for all using (true) with check (true);
-create policy "public_read_write" on job_updates for all using (true) with check (true);`;
+  const RM_COLS = [
+    { key: "material_no", label: "Material No", req: true },
+    { key: "op_no", label: "Op No", req: true, num: true },
+    { key: "work_center", label: "Work Center", req: true },
+    { key: "op_description", label: "Op Description", req: false },
+    { key: "setup_time", label: "Setup Time (min)", req: false, num: true },
+    { key: "machine_time", label: "Machine Time (min)", req: true, num: true },
+    { key: "labor_time", label: "Labor Time (min)", req: false, num: true },
+  ];
+
+  const PO_TEMPLATE = [
+    ["Order No", "Material No", "Description", "Qty", "UoM", "Start Date", "End Date", "Status"],
+    ["PO-1001", "MAT-001", "Wheel Head Body", 10, "EA", "2026-06-10", "2026-06-20", "Created"],
+    ["PO-1002", "MAT-002", "Spindle Housing", 5, "EA", "2026-06-12", "2026-06-25", "Created"],
+  ];
+
+  const RM_TEMPLATE = [
+    ["Material No", "Op No", "Work Center", "Op Description", "Setup Time (min)", "Machine Time (min)", "Labor Time (min)"],
+    ["MAT-001", 10, "JB-51", "Turn outer diameter", 30, 45, 10],
+    ["MAT-001", 20, "Grinding", "Grind to finish", 15, 30, 5],
+    ["MAT-002", 10, "DR-31", "Drill holes", 20, 40, 8],
+  ];
+
+  function downloadTemplate(type) {
+    const data = type === "po" ? PO_TEMPLATE : RM_TEMPLATE;
+    const ws = window.XLSX.utils.aoa_to_sheet(data);
+    ws["!cols"] = data[0].map(() => ({ wch: 20 }));
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, type === "po" ? "Production Orders" : "Routing Master");
+    window.XLSX.writeFile(wb, `template_${type === "po" ? "production_orders" : "routing_master"}.xlsx`);
+  }
+
+  function parseFile(file, cols, setter) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = window.XLSX.read(e.target.result, { type: "binary", cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw = window.XLSX.utils.sheet_to_json(ws, { defval: "", raw: false, dateNF: "YYYY-MM-DD" });
+        const norm = (s) => s.toString().toLowerCase().replace(/[^a-z0-9]/g, "");
+        const rows = raw.map((row, i) => {
+          const normRow = {};
+          Object.keys(row).forEach(k => { normRow[norm(k)] = row[k]; });
+          const data = {};
+          const errors = [];
+          cols.forEach(col => {
+            let val = normRow[norm(col.label)] ?? normRow[norm(col.key)] ?? "";
+            data[col.key] = val;
+            if (col.req && (val === "" || val === null)) errors.push(col.label + " missing");
+            if (col.num && val !== "" && isNaN(Number(val))) errors.push(col.label + " must be a number");
+          });
+          return { rowNum: i + 2, data, errors, valid: errors.length === 0 };
+        });
+        setter(rows);
+      } catch (err) {
+        alert("Could not read file: " + err.message);
+      }
+    };
+    reader.readAsBinaryString(file);
+  }
+
+  async function doImport(type) {
+    const rows = (type === "po" ? poRows : rmRows).filter(r => r.valid).map(r => r.data);
+    const setter = type === "po" ? setPoStatus : setRmStatus;
+    setter({ loading: true, msg: "" });
+    try {
+      if (type === "po") await DATA.bulkInsertPO(rows);
+      else await DATA.bulkInsertRouting(rows);
+      setter({ loading: false, msg: `✓ ${rows.length} records imported successfully!`, ok: true });
+    } catch (e) {
+      setter({ loading: false, msg: "Import failed: " + e.message, ok: false });
+    }
+  }
+
+  function downloadErrors(rows, type) {
+    const cols = type === "po" ? PO_COLS : RM_COLS;
+    const errRows = rows.filter(r => !r.valid);
+    const header = ["Row", ...cols.map(c => c.label), "Errors"];
+    const data = [header, ...errRows.map(r => [r.rowNum, ...cols.map(c => r.data[c.key] ?? ""), r.errors.join("; ")])];
+    const ws = window.XLSX.utils.aoa_to_sheet(data);
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, "Errors");
+    window.XLSX.writeFile(wb, `errors_${type}.xlsx`);
+  }
+
+  function PreviewTable({ rows, cols, type, status, onImport }) {
+    if (!rows) return null;
+    const valid = rows.filter(r => r.valid).length;
+    const errs = rows.length - valid;
+    return (
+      <div style={{ marginTop: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+          {[["Total", rows.length, "#d4a853"], ["Valid", valid, "#22c55e"], ["Errors", errs, errs > 0 ? "#ef4444" : "#555"]].map(([l, v, c]) => (
+            <div key={l} style={{ ...S.card, padding: "10px 12px" }}>
+              <div style={{ fontFamily: "monospace", fontSize: 9, color: "#555", textTransform: "uppercase" }}>{l}</div>
+              <div style={{ fontFamily: "monospace", fontSize: 22, fontWeight: 700, color: c }}>{v}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ overflowX: "auto", border: "1px solid #2a2a2a", borderRadius: 6 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "monospace", fontSize: 11, minWidth: 500 }}>
+            <thead>
+              <tr style={{ background: "#111" }}>
+                <th style={{ padding: "8px 10px", textAlign: "left", color: "#555", fontWeight: 700, borderBottom: "1px solid #2a2a2a", fontSize: 10 }}>#</th>
+                {cols.map(c => <th key={c.key} style={{ padding: "8px 10px", textAlign: "left", color: "#555", fontWeight: 700, borderBottom: "1px solid #2a2a2a", fontSize: 10, whiteSpace: "nowrap" }}>{c.label}{c.req ? " *" : ""}</th>)}
+                <th style={{ padding: "8px 10px", textAlign: "left", color: "#555", fontWeight: 700, borderBottom: "1px solid #2a2a2a", fontSize: 10 }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(0, 50).map(row => (
+                <tr key={row.rowNum} style={{ background: row.valid ? "transparent" : "#7f1d1d22", borderBottom: "1px solid #1e1e1e" }}>
+                  <td style={{ padding: "6px 10px", color: "#444" }}>{row.rowNum}</td>
+                  {cols.map(c => <td key={c.key} style={{ padding: "6px 10px", color: row.data[c.key] ? "#e8e2d4" : "#444" }}>{row.data[c.key] || "—"}</td>)}
+                  <td style={{ padding: "6px 10px" }}>
+                    {row.valid
+                      ? <span style={{ color: "#22c55e", fontSize: 10 }}>✓ OK</span>
+                      : <span style={{ color: "#ef4444", fontSize: 10 }}>{row.errors.join(", ")}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rows.length > 50 && <div style={{ fontFamily: "monospace", fontSize: 10, color: "#555", marginTop: 6, textAlign: "center" }}>Showing first 50 of {rows.length} rows</div>}
+
+        {status && (
+          <div style={{ ...S.card, marginTop: 12, color: status.ok ? "#22c55e" : "#ef4444", fontFamily: "monospace", fontSize: 12, textAlign: "center" }}>
+            {status.loading ? "⏳ IMPORTING…" : status.msg}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          {valid > 0 && (
+            <button style={{ ...S.btn("success"), flex: 1 }} onClick={onImport} disabled={status?.loading}>
+              {status?.loading ? "IMPORTING…" : `⬆ IMPORT ${valid} VALID ROWS`}
+            </button>
+          )}
+          {errs > 0 && (
+            <button style={S.btn("ghost")} onClick={() => downloadErrors(rows, type)}>
+              ⬇ DOWNLOAD ERRORS
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function DropZone({ type, cols, rows, setter }) {
+    const [drag, setDrag] = useState(false);
+    return (
+      <div
+        onDragOver={e => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) parseFile(f, cols, setter); }}
+        style={{ border: `1.5px dashed ${drag ? "#d4a853" : "#333"}`, borderRadius: 6, padding: "28px 16px", textAlign: "center", background: drag ? "#d4a85311" : "#111", position: "relative", cursor: "pointer" }}
+      >
+        <input type="file" accept=".xlsx,.xls,.csv"
+          onChange={e => { const f = e.target.files[0]; if (f) parseFile(f, cols, setter); }}
+          style={{ position: "absolute", inset: 0, opacity: 0, cursor: "pointer" }} />
+        <div style={{ fontSize: 28, marginBottom: 8 }}>📂</div>
+        <div style={{ fontFamily: "monospace", fontSize: 12, color: "#888" }}>
+          <span style={{ color: "#d4a853", fontWeight: 700 }}>Click to browse</span> or drag & drop
+        </div>
+        <div style={{ fontFamily: "monospace", fontSize: 10, color: "#555", marginTop: 4 }}>Supports .xlsx · .xls · .csv</div>
+      </div>
+    );
+  }
+
+  if (!xlsxReady) return <div style={{ padding: 32, textAlign: "center", color: "#555", fontFamily: "monospace", fontSize: 12 }}>LOADING EXCEL ENGINE…</div>;
 
   return (
     <div style={{ padding: 16 }}>
-      <div style={S.sectionTitle}>⚡ Connect to Supabase (Live Sync)</div>
-      <div style={{ ...S.card, marginBottom: 12 }}>
-        <div style={{ fontFamily: "monospace", fontSize: 11, color: "#aaa", lineHeight: 1.7 }}>
-          <div style={{ color: "#22c55e", fontWeight: 700, marginBottom: 8 }}>✓ DEMO MODE ACTIVE — all data is local to this browser</div>
-          To enable real-time sync across all phones and desktops:
-          <ol style={{ paddingLeft: 18, marginTop: 8, color: "#888" }}>
-            <li style={{ marginBottom: 4 }}>Go to <a href="https://supabase.com" target="_blank" style={{ color: "#d4a853" }}>supabase.com</a> → Create free project</li>
-            <li style={{ marginBottom: 4 }}>Go to SQL Editor → paste the schema below → Run</li>
-            <li style={{ marginBottom: 4 }}>Go to Settings → API → copy Project URL and anon key</li>
-            <li style={{ marginBottom: 4 }}>In the app code, replace <code style={{ color: "#d4a853" }}>SUPABASE_URL</code> and <code style={{ color: "#d4a853" }}>SUPABASE_KEY</code></li>
-            <li>Deploy to <a href="https://vercel.com" target="_blank" style={{ color: "#d4a853" }}>vercel.com</a> (free) → share URL with all phones</li>
-          </ol>
-        </div>
+      <div style={S.sectionTitle}>Bulk Data Import</div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        {[["po", "Production Orders"], ["rm", "Routing Master"]].map(([id, label]) => (
+          <button key={id} style={S.tab(activeTab === id)} onClick={() => setActiveTab(id)}>{label}</button>
+        ))}
       </div>
-      <div style={S.sectionTitle}>SQL Schema</div>
-      <pre style={{ background: "#111", border: "1px solid #222", borderRadius: 6, padding: 14, fontSize: 10, fontFamily: "monospace", color: "#a8c5a0", overflowX: "auto", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{sql}</pre>
+
+      {activeTab === "po" && (
+        <div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+            <button style={S.btn("ghost")} onClick={() => downloadTemplate("po")}>⬇ DOWNLOAD TEMPLATE</button>
+            <span style={{ fontFamily: "monospace", fontSize: 10, color: "#555" }}>Fill template then upload below</span>
+          </div>
+          <DropZone type="po" cols={PO_COLS} rows={poRows} setter={setPoRows} />
+          <PreviewTable rows={poRows} cols={PO_COLS} type="po" status={poStatus} onImport={() => doImport("po")} />
+        </div>
+      )}
+
+      {activeTab === "rm" && (
+        <div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+            <button style={S.btn("ghost")} onClick={() => downloadTemplate("rm")}>⬇ DOWNLOAD TEMPLATE</button>
+            <span style={{ fontFamily: "monospace", fontSize: 10, color: "#555" }}>Fill template then upload below</span>
+          </div>
+          <DropZone type="rm" cols={RM_COLS} rows={rmRows} setter={setRmRows} />
+          <PreviewTable rows={rmRows} cols={RM_COLS} type="rm" status={rmStatus} onImport={() => doImport("rm")} />
+        </div>
+      )}
     </div>
   );
 }
@@ -736,6 +912,7 @@ export default function App() {
     { id: "scan", label: "SCAN" },
     { id: "dashboard", label: "DASH" },
     { id: "jobs", label: "JOBS" },
+    { id: "import", label: "IMPORT" },
     { id: "routing", label: "SETUP" },
   ];
 
@@ -758,12 +935,8 @@ export default function App() {
       {page === "job" && job && <JobDetailPage job={job} onBack={() => { setJob(null); setPage("scan"); }} />}
       {page === "dashboard" && <Dashboard />}
       {page === "jobs" && <JobCardManager />}
-      {page === "routing" && (
-        <div>
-          <RoutingMaster />
-          {DEMO_MODE && <SetupHelper />}
-        </div>
-      )}
+      {page === "import" && <BulkImport />}
+      {page === "routing" && <RoutingMaster />}
     </div>
   );
 }
