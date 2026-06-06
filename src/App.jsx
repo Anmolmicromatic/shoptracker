@@ -730,7 +730,37 @@ function BulkImport() {
   const PO_TPL=[["Order No","Material No","Description","Qty","UoM","Start Date","End Date","Status"],["PO-1001","MAT-001","Wheel Head Body",10,"EA","2026-06-10","2026-06-20","Created"],["PO-1002","MAT-002","Spindle Housing",5,"EA","2026-06-12","2026-06-25","Created"]];
   const RM_TPL=[["Material No","Op No","Work Center","Op Description","Setup Time (min)","Machine Time (min)","Labor Time (min)"],["MAT-001",10,"JB-51","Turn outer diameter",30,45,10],["MAT-001",20,"Grinding","Grind to finish",15,30,5]];
   function dl(type){ const d=type==="po"?PO_TPL:RM_TPL; const ws=window.XLSX.utils.aoa_to_sheet(d); ws["!cols"]=d[0].map(()=>({wch:20})); const wb=window.XLSX.utils.book_new(); window.XLSX.utils.book_append_sheet(wb,ws,type==="po"?"Production Orders":"Routing Master"); window.XLSX.writeFile(wb,`template_${type}.xlsx`); }
-  function parseFile(file,cols,setter){ const r=new FileReader(); r.onload=e=>{ try{ const wb=window.XLSX.read(e.target.result,{type:"binary",cellDates:true}); const ws=wb.Sheets[wb.SheetNames[0]]; const raw=window.XLSX.utils.sheet_to_json(ws,{defval:"",raw:false,dateNF:"YYYY-MM-DD"}); const norm=s=>s.toString().toLowerCase().replace(/[^a-z0-9]/g,""); const rows=raw.map((row,i)=>{ const nr={}; Object.keys(row).forEach(k=>{nr[norm(k)]=row[k];}); const data={}; const errors=[]; cols.forEach(col=>{ // try label, key, then all aliases in order const allNames=[col.label,col.key,...(col.aliases||[])]; let v=""; for(const name of allNames){ const found=nr[norm(name)]; if(found!==undefined&&found!==""){v=found;break;} } data[col.key]=v; if(col.req&&(v===""||v===null||v===undefined))errors.push(col.label+" missing"); if(col.num&&v!==""&&v!==null&&v!==undefined&&isNaN(Number(v)))errors.push(col.label+" must be a number"); }); return{rowNum:i+2,data,errors,valid:errors.length===0}; }); setter(rows); }catch(err){alert("Cannot read file: "+err.message);} }; r.readAsBinaryString(file); }
+  function parseFile(file,cols,setter){
+    const r=new FileReader();
+    r.onload=e=>{
+      try{
+        const wb=window.XLSX.read(e.target.result,{type:"binary",cellDates:true});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const raw=window.XLSX.utils.sheet_to_json(ws,{defval:"",raw:false,dateNF:"YYYY-MM-DD"});
+        const norm=s=>s.toString().toLowerCase().replace(/[^a-z0-9]/g,"");
+        const rows=raw.map((row,i)=>{
+          const nr={};
+          Object.keys(row).forEach(k=>{nr[norm(k)]=row[k];});
+          const data={};
+          const errors=[];
+          cols.forEach(col=>{
+            const allNames=[col.label,col.key,...(col.aliases||[])];
+            let v="";
+            for(const name of allNames){
+              const found=nr[norm(name)];
+              if(found!==undefined&&found!==""){v=found;break;}
+            }
+            data[col.key]=v;
+            if(col.req&&(v===""||v===null||v===undefined))errors.push(col.label+" missing");
+            if(col.num&&v!==""&&v!==null&&v!==undefined&&isNaN(Number(v)))errors.push(col.label+" must be a number");
+          });
+          return{rowNum:i+2,data,errors,valid:errors.length===0};
+        });
+        setter(rows);
+      }catch(err){alert("Cannot read file: "+err.message);}
+    };
+    r.readAsBinaryString(file);
+  }
   async function doImport(type){ const rows=(type==="po"?poRows:rmRows).filter(r=>r.valid).map(r=>r.data); const setter=type==="po"?setPoStatus:setRmStatus; setter({loading:true}); try{ if(type==="po")await DATA.bulkInsertPO(rows); else await DATA.bulkInsertRouting(rows); setter({loading:false,msg:`✓ ${rows.length} records imported!`,ok:true}); }catch(e){setter({loading:false,msg:"Failed: "+e.message,ok:false});} }
   function dlErrors(rows,type){ const cols=type==="po"?PO_COLS:RM_COLS; const errRows=rows.filter(r=>!r.valid); const h=["Row",...cols.map(c=>c.label),"Errors"]; const d=[h,...errRows.map(r=>[r.rowNum,...cols.map(c=>r.data[c.key]??""),r.errors.join("; ")])]; const ws=window.XLSX.utils.aoa_to_sheet(d); const wb=window.XLSX.utils.book_new(); window.XLSX.utils.book_append_sheet(wb,ws,"Errors"); window.XLSX.writeFile(wb,`errors_${type}.xlsx`); }
 
