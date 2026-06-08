@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 const DEFAULT_STATIONS = ["Receiving","HM-51","HM-52","VM-35","JB-51","DR-31","DR-32","VM-40","CNC-01","CNC-02","Grinding","Inspection","Dispatch"];
 const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
 const PASSCODE = "1234";
-const STATUSES = ["Running","WIP"];
+const STATUSES = ["Running","WIP","Complete","Hold","Pending"];
 const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Complete:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
 
 // ─── SUPABASE ──────────────────────────────────────────────────────────────
@@ -484,20 +484,15 @@ function LabelPrintPage({ rows, startPos, onBack }) {
 // ─── LOG UPDATE ────────────────────────────────────────────────────────────
 function LogUpdate({ stations, supervisors, onSaved }) {
   const [scanMode, setScanMode] = useState(null);
-  const [poInput, setPoInput] = useState("");
-  const [job, setJob] = useState(null);
-  const [jobLoading, setJobLoading] = useState(false);
-  const [jobErr, setJobErr] = useState("");
-  // Manual fields (used when DB not available)
-  const [manualMat, setManualMat] = useState("");
-  const [manualQty, setManualQty] = useState("");
-  const [manualDesc, setManualDesc] = useState("");
-  const [manualMode, setManualMode] = useState(false);
-  // Step 2
+  // Step 1 — Job details
+  const [po, setPo] = useState("");
+  const [material, setMaterial] = useState("");
+  const [qty, setQty] = useState("");
+  // Step 2 — Machine
   const [station, setStation] = useState("");
   const [stationInput, setStationInput] = useState("");
   const [stationMode, setStationMode] = useState("dropdown");
-  // Step 3
+  // Step 3 — Status & Supervisor
   const [status, setStatus] = useState("WIP");
   const [supervisor, setSupervisor] = useState(supervisors[0]||"");
   const [saving, setSaving] = useState(false);
@@ -505,58 +500,41 @@ function LogUpdate({ stations, supervisors, onSaved }) {
   const [step, setStep] = useState(1);
 
   const effectiveStation = stationMode==="manual" ? stationInput.trim() : station;
-  const effectiveJob = job || (manualMode && poInput ? { production_number:poInput, material_number:manualMat, quantity:manualQty, description:manualDesc, id:null, routing:[] } : null);
-  const routingStations = (effectiveJob?.routing||[]).map(op=>{ const m={"OP-10 Rec":"Receiving","OP-20 JB-51":"JB-51","OP-30 DR-31":"DR-31","OP-40 VM-40":"VM-40","OP-50 Grinding":"Grinding","OP-60 Inspection":"Inspection","OP-70 Dispatch":"Dispatch"}; return m[op]||op; });
-  const isDeviation = effectiveStation && routingStations.length>0 && !routingStations.includes(effectiveStation);
+  const jobReady = po.trim() && material.trim() && qty.trim();
 
-  async function lookupJob(code) {
-    setJobLoading(true); setJobErr(""); setManualMode(false);
-    const decoded = decodeQR(code);
-    if (decoded.fromQR) {
-      // QR has full data — use directly, also try DB in background
-      const fromQRJob = { production_number:decoded.production_number, material_number:decoded.material_number, quantity:decoded.quantity, description:decoded.description, id:null, routing:[] };
-      setJob(fromQRJob);
-      setPoInput(decoded.production_number);
-      setStep(2);
-      setJobLoading(false);
-      try { const dbJob = await db.getJob(decoded.production_number); if (dbJob) setJob(dbJob); } catch(e) {}
-      return;
+  function handleQRScan(code) {
+    setScanMode(null);
+    if (scanMode==="job") {
+      const decoded = decodeQR(code);
+      setPo(decoded.production_number||"");
+      setMaterial(decoded.material_number||"");
+      setQty(decoded.quantity||"");
+      if (decoded.production_number) setStep(2);
     }
-    try {
-      const j = await db.getJob(decoded.production_number);
-      if (j) { setJob(j); setStep(2); }
-      else {
-        setJobErr(`PO not found in database.`);
-        setManualMode(true);
-        setPoInput(decoded.production_number);
-      }
-    } catch(e) {
-      setJobErr("DB unavailable — enter details manually below.");
-      setManualMode(true);
-      setPoInput(decoded.production_number);
+    if (scanMode==="machine") {
+      const found = stations.find(s=>s.toUpperCase()===code.trim().toUpperCase());
+      if (found) { setStation(found); setStationMode("dropdown"); }
+      else { setStationInput(code.trim()); setStationMode("manual"); }
+      setStep(3);
     }
-    setJobLoading(false);
   }
 
   async function save() {
-    if (!effectiveJob || !effectiveStation || !supervisor) return;
+    if (!po.trim()||!effectiveStation||!supervisor) return;
     setSaving(true);
     try {
       await db.addUpdate({
-        job_id: effectiveJob.id||null,
-        production_number: effectiveJob.production_number,
-        material_number: effectiveJob.material_number||manualMat,
-        description: effectiveJob.description||manualDesc,
-        quantity: effectiveJob.quantity||manualQty,
-        supervisor, station:effectiveStation, status,
-        is_deviation: isDeviation,
-        deviation_reason: isDeviation ? `Used: ${effectiveStation}` : "",
+        job_id: null,
+        production_number: po.trim(),
+        material_number: material.trim(),
+        quantity: qty.trim(),
+        supervisor,
+        station: effectiveStation,
+        status,
+        is_deviation: false,
         unknown_machine: !stations.includes(effectiveStation),
         created_at: new Date().toISOString()
       });
-      if (effectiveJob.id) {
-        await db.updateJob(effectiveJob.id, { current_station:effectiveStation, current_status:status, last_updated:new Date().toISOString() });
-      }
       if (navigator.vibrate) navigator.vibrate(200);
       setDone(true);
       setTimeout(()=>{ onSaved(); reset(); }, 1500);
@@ -565,130 +543,141 @@ function LogUpdate({ stations, supervisors, onSaved }) {
   }
 
   function reset() {
-    setJob(null); setPoInput(""); setStation(""); setStationInput("");
+    setPo(""); setMaterial(""); setQty("");
+    setStation(""); setStationInput(""); setStationMode("dropdown");
     setStatus("WIP"); setStep(1); setDone(false); setSaving(false);
-    setJobErr(""); setManualMode(false); setManualMat(""); setManualQty(""); setManualDesc("");
-    setStationMode("dropdown");
   }
 
   if (done) return (
     <div style={{ padding:24, textAlign:"center" }}>
       <div style={{ ...S.card, padding:40 }}>
         <div style={{ fontSize:48, marginBottom:12 }}>✓</div>
-        <div style={{ color:"#22c55e", fontFamily:"monospace", fontSize:14, fontWeight:700 }}>SAVED — OPENING JOB STATUS…</div>
+        <div style={{ color:"#22c55e", fontFamily:"monospace", fontSize:14, fontWeight:700 }}>SAVED!</div>
       </div>
     </div>
   );
 
   return (
     <div style={{ padding:16, maxWidth:520, margin:"0 auto" }}>
-      {scanMode && (
-        <QRScanner
-          onResult={code=>{
-            setScanMode(null);
-            if (scanMode==="job") lookupJob(code);
-            if (scanMode==="machine") {
-              const found = stations.find(s=>s.toUpperCase()===code.trim().toUpperCase());
-              setStation(found||code.trim());
-              if (!found) { setStationMode("manual"); setStationInput(code.trim()); }
-              setStep(3);
-            }
-          }}
-          onClose={()=>setScanMode(null)}
-        />
+      {scanMode && <QRScanner onResult={handleQRScan} onClose={()=>setScanMode(null)} />}
+
+      {step>1 && (
+        <button style={{ ...S.btn("ghost"), fontSize:11, marginBottom:12 }} onClick={()=>setStep(step-1)}>← BACK</button>
       )}
 
-      {step>1 && <button style={{ ...S.btn("ghost"), fontSize:11, marginBottom:12 }} onClick={()=>setStep(step-1)}>← BACK</button>}
-
-      {/* STEP 1 */}
+      {/* ── STEP 1: JOB DETAILS ── */}
       {step===1 && (
         <div style={S.card}>
           <div style={S.sectionTitle}>STEP 1 — JOB CARD</div>
-          <button style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:14, marginBottom:12 }} onClick={()=>setScanMode("job")}>
+
+          <button style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:14, marginBottom:16 }} onClick={()=>setScanMode("job")}>
             ▣ &nbsp; SCAN JOB LABEL QR
           </button>
-          <div style={{ textAlign:"center", color:"#444", fontSize:10, marginBottom:12 }}>— or enter PO manually —</div>
-          <label style={S.label}>Production Order No.</label>
-          <input style={{ ...S.input, marginBottom:8 }} value={poInput} onChange={e=>{ setPoInput(e.target.value); setJobErr(""); setManualMode(false); }} onKeyDown={e=>e.key==="Enter"&&poInput&&lookupJob(poInput)} placeholder="e.g. 100031646" />
-          {jobErr && <div style={{ color:"#f59e0b", fontSize:11, marginBottom:8 }}>{jobErr}</div>}
 
-          {/* Manual fields — shown when DB lookup fails */}
-          {manualMode && (
-            <div style={{ borderTop:"1px solid #222", paddingTop:12, marginTop:4 }}>
-              <div style={{ fontFamily:"monospace", fontSize:10, color:"#f59e0b", marginBottom:10 }}>Enter job details manually:</div>
-              {[["Material No.","manualMat",setManualMat,manualMat,"M161501"],["Quantity","manualQty",setManualQty,manualQty,"3 Nos"],["Description","manualDesc",setManualDesc,manualDesc,"Wheel head body"]].map(([lbl,,setter,val,ph])=>(
-                <div key={lbl} style={{ marginBottom:8 }}>
-                  <label style={S.label}>{lbl}</label>
-                  <input style={{ ...S.input }} value={val} onChange={e=>setter(e.target.value)} placeholder={ph} />
-                </div>
-              ))}
-              <button style={{ ...S.btn("primary"), width:"100%", marginTop:4 }} onClick={()=>{ if(poInput) setStep(2); }}>
-                CONTINUE WITH MANUAL DETAILS →
-              </button>
-            </div>
-          )}
+          <div style={{ textAlign:"center", color:"#444", fontSize:10, marginBottom:14 }}>— or enter manually —</div>
 
-          {!manualMode && (
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>lookupJob(poInput)} disabled={jobLoading||!poInput}>
-              {jobLoading?"SEARCHING…":"FIND JOB →"}
-            </button>
-          )}
+          <div style={{ marginBottom:10 }}>
+            <label style={S.label}>Production Order No. *</label>
+            <input style={S.input} value={po} onChange={e=>setPo(e.target.value)} placeholder="e.g. 100031646" />
+          </div>
+          <div style={{ marginBottom:10 }}>
+            <label style={S.label}>Material No. *</label>
+            <input style={S.input} value={material} onChange={e=>setMaterial(e.target.value)} placeholder="e.g. M161501" />
+          </div>
+          <div style={{ marginBottom:16 }}>
+            <label style={S.label}>Quantity *</label>
+            <input style={S.input} value={qty} onChange={e=>setQty(e.target.value)} placeholder="e.g. 10 Nos" />
+          </div>
+
+          <button
+            style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13 }}
+            onClick={()=>{ if(jobReady) setStep(2); }}
+            disabled={!jobReady}
+          >
+            NEXT — SELECT MACHINE →
+          </button>
         </div>
       )}
 
-      {/* STEP 2 */}
-      {step===2 && effectiveJob && (
+      {/* ── STEP 2: MACHINE ── */}
+      {step===2 && (
         <div>
           <div style={{ ...S.card, marginBottom:12, borderColor:"#d4a85344" }}>
-            <div style={{ fontFamily:"monospace", fontSize:13, fontWeight:700, color:"#d4a853" }}>{effectiveJob.production_number}</div>
-            <div style={{ fontFamily:"monospace", fontSize:11, color:"#aaa", marginTop:2 }}>{effectiveJob.material_number} · {effectiveJob.description}</div>
-            <div style={{ fontFamily:"monospace", fontSize:11, color:"#888", marginTop:2 }}>QTY: {effectiveJob.quantity}</div>
+            <div style={{ fontFamily:"monospace", fontSize:13, fontWeight:700, color:"#d4a853" }}>{po}</div>
+            <div style={{ fontFamily:"monospace", fontSize:11, color:"#aaa", marginTop:2 }}>MAT: {material} &nbsp;·&nbsp; QTY: {qty}</div>
           </div>
+
           <div style={S.card}>
-            <div style={S.sectionTitle}>STEP 2 — SELECT MACHINE</div>
-            <button style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13, marginBottom:12 }} onClick={()=>setScanMode("machine")}>
+            <div style={S.sectionTitle}>STEP 2 — MACHINE</div>
+
+            <button style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13, marginBottom:14 }} onClick={()=>setScanMode("machine")}>
               ▣ &nbsp; SCAN MACHINE QR
             </button>
-            <div style={{ textAlign:"center", color:"#444", fontSize:10, marginBottom:10 }}>— or select / type —</div>
+
+            <div style={{ textAlign:"center", color:"#444", fontSize:10, marginBottom:12 }}>— or select / type —</div>
+
             <div style={{ display:"flex", gap:6, marginBottom:10 }}>
               <button style={{ ...S.tab(stationMode==="dropdown"), flex:1, padding:"7px" }} onClick={()=>setStationMode("dropdown")}>FROM LIST</button>
               <button style={{ ...S.tab(stationMode==="manual"), flex:1, padding:"7px" }} onClick={()=>setStationMode("manual")}>TYPE MANUALLY</button>
             </div>
-            {stationMode==="dropdown"
-              ? <select style={{ ...S.select, marginBottom:10 }} value={station} onChange={e=>setStation(e.target.value)}><option value="">-- Select Machine --</option>{stations.map(s=><option key={s} value={s}>{s}</option>)}</select>
-              : <input style={{ ...S.input, marginBottom:10 }} value={stationInput} onChange={e=>setStationInput(e.target.value)} placeholder="Type machine e.g. VM-35" />
-            }
-            {isDeviation && <div style={S.warn}>⚠ DEVIATION — not in routing. Will be flagged.</div>}
-            {effectiveStation && !stations.includes(effectiveStation) && <div style={{ ...S.warn, borderColor:"#6366f1", color:"#a5b4fc", background:"#1e1b4b44" }}>ℹ Unknown machine — saved as-is.</div>}
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>{ if(effectiveStation) setStep(3); }} disabled={!effectiveStation}>CONFIRM MACHINE →</button>
+
+            {stationMode==="dropdown" ? (
+              <select style={{ ...S.select, marginBottom:12 }} value={station} onChange={e=>setStation(e.target.value)}>
+                <option value="">-- Select Machine --</option>
+                {stations.map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+            ) : (
+              <input style={{ ...S.input, marginBottom:12 }} value={stationInput} onChange={e=>setStationInput(e.target.value)} placeholder="Type machine name e.g. HM-51" />
+            )}
+
+            {effectiveStation && !stations.includes(effectiveStation) && (
+              <div style={{ ...S.warn, borderColor:"#6366f1", color:"#a5b4fc", background:"#1e1b4b44", marginBottom:12 }}>
+                ℹ Machine not in master list — will be saved as entered.
+              </div>
+            )}
+
+            <button
+              style={{ ...S.btn("primary"), width:"100%" }}
+              onClick={()=>{ if(effectiveStation) setStep(3); }}
+              disabled={!effectiveStation}
+            >
+              NEXT — STATUS & SUPERVISOR →
+            </button>
           </div>
         </div>
       )}
 
-      {/* STEP 3 */}
-      {step===3 && effectiveJob && (
+      {/* ── STEP 3: STATUS + SUPERVISOR ── */}
+      {step===3 && (
         <div>
           <div style={{ ...S.card, marginBottom:12, borderColor:"#d4a85344" }}>
-            <div style={{ fontFamily:"monospace", fontSize:12, fontWeight:700, color:"#d4a853" }}>{effectiveJob.production_number} · {effectiveStation}</div>
-            <div style={{ fontFamily:"monospace", fontSize:11, color:"#aaa", marginTop:2 }}>{effectiveJob.material_number} — {effectiveJob.description}</div>
+            <div style={{ fontFamily:"monospace", fontSize:12, fontWeight:700, color:"#d4a853" }}>{po} &nbsp;·&nbsp; {effectiveStation}</div>
+            <div style={{ fontFamily:"monospace", fontSize:11, color:"#aaa", marginTop:2 }}>MAT: {material} &nbsp;·&nbsp; QTY: {qty}</div>
           </div>
+
           <div style={S.card}>
             <div style={S.sectionTitle}>STEP 3 — STATUS & SUPERVISOR</div>
-            {isDeviation && <div style={S.warn}>⚠ DEVIATION flagged</div>}
+
             <label style={S.label}>Status</label>
-            <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:16 }}>
+            <div style={{ display:"flex", gap:8, marginBottom:18 }}>
               {STATUSES.map(s=>(
-                <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, minWidth:70, padding:"10px 6px", borderRadius:4, fontSize:11, fontFamily:"monospace", fontWeight:700, cursor:"pointer", textTransform:"uppercase", letterSpacing:"0.06em", border:`1px solid ${STATUS_COLORS[s]}`, background:status===s?STATUS_COLORS[s]:STATUS_COLORS[s]+"22", color:status===s?"#0f0f0f":STATUS_COLORS[s] }}>
+                <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, padding:"12px 8px", borderRadius:4, fontSize:12, fontFamily:"monospace", fontWeight:700, cursor:"pointer", textTransform:"uppercase", letterSpacing:"0.06em", border:`1px solid ${STATUS_COLORS[s]}`, background:status===s?STATUS_COLORS[s]:STATUS_COLORS[s]+"22", color:status===s?"#0f0f0f":STATUS_COLORS[s], transition:"all .15s" }}>
                   {s}
                 </button>
               ))}
             </div>
+
             <label style={S.label}>Supervisor</label>
             <select style={{ ...S.select, marginBottom:20 }} value={supervisor} onChange={e=>setSupervisor(e.target.value)}>
               {supervisors.map(s=><option key={s}>{s}</option>)}
             </select>
-            <button style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:15, letterSpacing:"0.2em" }} onClick={save} disabled={saving}>
-              {saving?"SAVING…":"✓  OK — SAVE UPDATE"}
+
+            <button
+              style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:15, letterSpacing:"0.15em" }}
+              onClick={save}
+              disabled={saving}
+            >
+              {saving ? "SAVING…" : "✓  OK — SAVE"}
             </button>
           </div>
         </div>
@@ -1046,7 +1035,7 @@ function BulkImport() {
 // ─── ROOT APP ──────────────────────────────────────────────────────────────
 export default function App() {
   const [unlocked, setUnlocked] = useState(false);
-  const [page, setPage] = useState("labels");
+  const [page, setPage] = useState("log");
   const [stations, setStations] = useState(DEFAULT_STATIONS);
   const [supervisors, setSupervisors] = useState(DEFAULT_SUPERVISORS);
 
@@ -1067,8 +1056,8 @@ export default function App() {
   if (!unlocked) return <PasscodeGate onUnlock={()=>setUnlocked(true)} />;
 
   const TABS = [
-    { id:"labels", label:"PRINT LABELS" },
     { id:"log",    label:"LOG UPDATE" },
+    { id:"labels", label:"PRINT LABELS" },
     { id:"status", label:"JOB STATUS" },
     { id:"import", label:"IMPORT" },
     { id:"setup",  label:"SETUP" },
