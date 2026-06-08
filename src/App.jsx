@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from "react";
 const DEFAULT_STATIONS = ["Receiving","HM-51","HM-52","VM-35","JB-51","DR-31","DR-32","VM-40","CNC-01","CNC-02","Grinding","Inspection","Dispatch"];
 const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
 const PASSCODE = "1234";
-const STATUSES = ["Running","Waiting","Completed","QA Hold"];
-const STATUS_COLORS = { Running:"#22c55e", Waiting:"#3b82f6", Completed:"#8b5cf6", QA Hold:"#ef4444" };
+const STATUSES = ["Running","WIP","Complete","Hold","Pending"];
+const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Complete:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
 
 // ─── SUPABASE ──────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://fsrknhittjbqtbersqjd.supabase.co";
@@ -206,7 +206,6 @@ function PrintLabels() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
-  const [exportingWord, setExportingWord] = useState(false);
   const [startPos, setStartPos] = useState(1); // 1-based start position on sheet
 
   useEffect(()=>{
@@ -271,29 +270,88 @@ function PrintLabels() {
     }
   }
 
-  async function saveAndPrint() {
+  async function openPrintTab() {
     setSaving(true);
     try { await saveToDb(); setSaved(true); } catch(e) { console.warn("DB:", e.message); }
     setSaving(false);
-    setShowPrint(true);
-  }
 
-  async function exportWord() {
-    if (validRows.length === 0) return;
-    setExportingWord(true);
-    try {
-      await saveToDb();
-      const payload = { labels: expandedLabels.map(r=>({ po:r.po, material:r.material, qty:r.qty, description:r.description })), startPos };
-      const res = await fetch('/api/generate-labels', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
-      if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob();
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `labels_${new Date().toISOString().slice(0,10)}.docx`;
-      a.click();
-      setSaved(true);
-    } catch(e) { alert('Export failed: ' + e.message); }
-    setExportingWord(false);
+    const labelsJson = JSON.stringify(expandedLabels.map(r=>({
+      po: r.po, material: r.material, qty: r.qty, desc: r.description
+    })));
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ShopTracker Labels</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#f0f0f0; font-family:'Courier New',monospace; }
+  .controls { padding:16px; background:#1a1a1a; color:#d4a853; display:flex; gap:12px; align-items:center; }
+  .controls button { background:#d4a853; color:#000; border:none; padding:10px 20px; font-weight:bold; cursor:pointer; font-family:monospace; font-size:13px; border-radius:3px; }
+  .sheet { width:210mm; height:297mm; background:white; margin:20px auto; position:relative; box-shadow:0 2px 20px rgba(0,0,0,0.3); overflow:hidden; }
+  .label-grid { position:absolute; top:16.479mm; left:7.597mm; display:grid; grid-template-columns:64mm 64mm 64mm; grid-template-rows:repeat(8,34mm); column-gap:2.472mm; row-gap:0mm; }
+  .label { width:64mm; height:34mm; border:0.3mm solid #999; display:flex; flex-direction:row; align-items:center; padding:2mm 3mm 2mm 4mm; gap:1.5mm; overflow:hidden; }
+  .label.empty { border:0.3mm dashed #ddd; }
+  .label-text { flex:1; overflow:hidden; display:flex; flex-direction:column; justify-content:center; gap:0.8mm; min-width:0; }
+  .label-po { font-size:8pt; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
+  .label-line { font-size:7.5pt; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
+  .label-line span { color:#666; font-weight:400; }
+  .label-desc { font-size:6.5pt; color:#333; font-weight:600; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; white-space:normal; word-break:break-word; }
+  .label-qr { width:20mm; height:20mm; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+  .label-qr canvas, .label-qr img { width:20mm !important; height:20mm !important; display:block; }
+  @media print {
+    @page { size:A4 portrait; margin:0mm; }
+    body { background:white; }
+    .controls { display:none !important; }
+    .sheet { margin:0; box-shadow:none; width:210mm; height:297mm; }
+    .label { border:0.3mm solid #aaa; }
+    .label.empty { border:none; }
+  }
+</style>
+</head>
+<body>
+<div class="controls">
+  <strong>⚙ SHOPTRACK — ${expandedLabels.length} Label${expandedLabels.length!==1?"s":""} · Position ${startPos}</strong>
+  <button onclick="window.print()">🖨 PRINT</button>
+  <span style="font-size:11px;color:#888;">Chrome: Margins=None · Scale=100% · A4</span>
+  <button onclick="window.close()" style="background:#333;color:#aaa;margin-left:auto;">✕ CLOSE</button>
+</div>
+<div class="sheet">
+  <div class="label-grid" id="labelGrid"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
+<script>
+const LABELS = ${labelsJson};
+const START_POS = ${startPos};
+const grid = document.getElementById('labelGrid');
+for (let i = 0; i < 24; i++) {
+  const idx = i - (START_POS - 1);
+  const lbl = (idx >= 0 && idx < LABELS.length) ? LABELS[idx] : null;
+  const cell = document.createElement('div');
+  cell.className = 'label' + (lbl ? '' : ' empty');
+  if (lbl) {
+    const txt = document.createElement('div');
+    txt.className = 'label-text';
+    txt.innerHTML = '<div class="label-po">PO: ' + lbl.po + '</div><div class="label-line"><span>MAT: </span>' + lbl.material + '</div><div class="label-line"><span>QTY: </span>' + lbl.qty + '</div><div class="label-desc">' + (lbl.desc||'') + '</div>';
+    cell.appendChild(txt);
+    const qrDiv = document.createElement('div');
+    qrDiv.className = 'label-qr';
+    qrDiv.id = 'qr' + i;
+    cell.appendChild(qrDiv);
+    grid.appendChild(cell);
+    new QRCode(document.getElementById('qr' + i), { text: JSON.stringify({po:lbl.po,material:lbl.material,qty:lbl.qty}), width:76, height:76, correctLevel:QRCode.CorrectLevel.M });
+  } else {
+    grid.appendChild(cell);
+  }
+}
+<\/script>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type:'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
   }
 
   if (showPrint) return <LabelPrintPage rows={expandedLabels} startPos={startPos} onBack={()=>setShowPrint(false)} />;
@@ -399,27 +457,16 @@ function PrintLabels() {
         )}
       </div>
 
-      {/* Primary: Export to Word */}
       <button
-        style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13, marginBottom:8 }}
-        onClick={exportWord}
-        disabled={validRows.length===0||exportingWord}
-      >
-        {exportingWord ? "GENERATING WORD FILE…" : `📄  EXPORT TO WORD — ${totalLabels} LABEL${totalLabels!==1?"S":""} (RECOMMENDED)`}
-      </button>
-
-      {/* Secondary: Browser print */}
-      <button
-        style={{ ...S.btn("ghost"), width:"100%", padding:"10px", fontSize:11 }}
-        onClick={saveAndPrint}
+        style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13 }}
+        onClick={openPrintTab}
         disabled={validRows.length===0||saving}
       >
-        {saving ? "SAVING…" : `🖨  BROWSER PRINT (backup)`}
+        {saving ? "SAVING…" : `🖨  GENERATE & PRINT ${totalLabels} LABEL${totalLabels!==1?"S":""}`}
       </button>
-
       {saved && <div style={{ fontFamily:"monospace", fontSize:11, color:"#22c55e", marginTop:8, textAlign:"center" }}>✓ Saved to database</div>}
       <div style={{ fontFamily:"monospace", fontSize:10, color:"#444", marginTop:6, textAlign:"center" }}>
-        Word export = guaranteed label alignment · Open .docx → Print in Word
+        Opens in new tab · Chrome: Margins=None · Scale=100% · A4
       </div>
     </div>
   );
