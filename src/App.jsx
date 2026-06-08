@@ -470,12 +470,12 @@ function LabelPrintPage({ rows, startPos, onBack }) {
         }
         .label-grid {
           position: absolute;
-          top: 12.979mm;
-          left: 4.597mm;
+          top: 10mm;
+          left: 5mm;
           display: grid;
           grid-template-columns: repeat(3, 64mm);
           grid-template-rows: repeat(8, 34mm);
-          column-gap: 2.472mm;
+          column-gap: 4mm;
           row-gap: 0mm;
         }
         .label-cell {
@@ -511,9 +511,9 @@ function LabelPrintPage({ rows, startPos, onBack }) {
             page-break-after: always;
           }
           .label-grid {
-            top: 12.979mm;
-            left: 4.597mm;
-            column-gap: 2.472mm;
+            top: 10mm;
+            left: 5mm;
+            column-gap: 4mm;
             row-gap: 0mm;
           }
           .label-cell { border: 0.2mm solid #bbb; }
