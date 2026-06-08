@@ -206,6 +206,7 @@ function PrintLabels() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
+  const [exportingWord, setExportingWord] = useState(false);
   const [startPos, setStartPos] = useState(1); // 1-based start position on sheet
 
   useEffect(()=>{
@@ -257,23 +258,42 @@ function PrintLabels() {
   const availableSlots = 24 - (startPos - 1);
   const fitsOnSheet = totalLabels <= availableSlots;
 
+  async function saveToDb() {
+    for (const r of validRows) {
+      try {
+        await db.createJob({
+          production_number: r.po.trim(), material_number: r.material.trim(),
+          description: r.description.trim(), quantity: r.qty.trim(),
+          printed_date: new Date().toISOString().slice(0,10),
+          current_status: "Pending", current_station: "Receiving", routing: [],
+        });
+      } catch(e) { /* duplicate, skip */ }
+    }
+  }
+
   async function saveAndPrint() {
     setSaving(true);
-    try {
-      for (const r of validRows) {
-        try {
-          await db.createJob({
-            production_number: r.po.trim(), material_number: r.material.trim(),
-            description: r.description.trim(), quantity: r.qty.trim(),
-            printed_date: new Date().toISOString().slice(0,10),
-            current_status: "Pending", current_station: "Receiving", routing: [],
-          });
-        } catch(e) { /* duplicate, skip */ }
-      }
-      setSaved(true);
-    } catch(e) { console.warn("DB save:", e.message); }
+    try { await saveToDb(); setSaved(true); } catch(e) { console.warn("DB:", e.message); }
     setSaving(false);
     setShowPrint(true);
+  }
+
+  async function exportWord() {
+    if (validRows.length === 0) return;
+    setExportingWord(true);
+    try {
+      await saveToDb();
+      const payload = { labels: expandedLabels.map(r=>({ po:r.po, material:r.material, qty:r.qty, description:r.description })), startPos };
+      const res = await fetch('/api/generate-labels', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `labels_${new Date().toISOString().slice(0,10)}.docx`;
+      a.click();
+      setSaved(true);
+    } catch(e) { alert('Export failed: ' + e.message); }
+    setExportingWord(false);
   }
 
   if (showPrint) return <LabelPrintPage rows={expandedLabels} startPos={startPos} onBack={()=>setShowPrint(false)} />;
@@ -379,14 +399,28 @@ function PrintLabels() {
         )}
       </div>
 
+      {/* Primary: Export to Word */}
       <button
-        style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13 }}
+        style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13, marginBottom:8 }}
+        onClick={exportWord}
+        disabled={validRows.length===0||exportingWord}
+      >
+        {exportingWord ? "GENERATING WORD FILE…" : `📄  EXPORT TO WORD — ${totalLabels} LABEL${totalLabels!==1?"S":""} (RECOMMENDED)`}
+      </button>
+
+      {/* Secondary: Browser print */}
+      <button
+        style={{ ...S.btn("ghost"), width:"100%", padding:"10px", fontSize:11 }}
         onClick={saveAndPrint}
         disabled={validRows.length===0||saving}
       >
-        {saving ? "SAVING…" : `🖨  PRINT ${totalLabels} LABEL${totalLabels!==1?"S":""} STARTING AT POSITION ${startPos}`}
+        {saving ? "SAVING…" : `🖨  BROWSER PRINT (backup)`}
       </button>
+
       {saved && <div style={{ fontFamily:"monospace", fontSize:11, color:"#22c55e", marginTop:8, textAlign:"center" }}>✓ Saved to database</div>}
+      <div style={{ fontFamily:"monospace", fontSize:10, color:"#444", marginTop:6, textAlign:"center" }}>
+        Word export = guaranteed label alignment · Open .docx → Print in Word
+      </div>
     </div>
   );
 }
@@ -470,12 +504,12 @@ function LabelPrintPage({ rows, startPos, onBack }) {
         }
         .label-grid {
           position: absolute;
-          top: 0mm;
-          left: 1mm;
+          top: 12.979mm;
+          left: 4.597mm;
           display: grid;
           grid-template-columns: repeat(3, 64mm);
           grid-template-rows: repeat(8, 34mm);
-          column-gap: 4mm;
+          column-gap: 2.472mm;
           row-gap: 0mm;
         }
         .label-cell {
@@ -511,9 +545,9 @@ function LabelPrintPage({ rows, startPos, onBack }) {
             page-break-after: always;
           }
           .label-grid {
-            top: 0mm;
-            left: 1mm;
-            column-gap: 4mm;
+            top: 12.979mm;
+            left: 4.597mm;
+            column-gap: 2.472mm;
             row-gap: 0mm;
           }
           .label-cell { border: 0.2mm solid #bbb; }
