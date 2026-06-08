@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from "react";
 const DEFAULT_STATIONS = ["Receiving","HM-51","HM-52","VM-35","JB-51","DR-31","DR-32","VM-40","CNC-01","CNC-02","Grinding","Inspection","Dispatch"];
 const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
 const PASSCODE = "1234";
-const STATUSES = ["Running","WIP","Complete","Hold","Pending"];
-const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Complete:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
+const STATUSES = ["Running","Waiting","Completed","QA Hold"];
+const STATUS_COLORS = { Running:"#22c55e", Waiting:"#3b82f6", Completed:"#8b5cf6", QA Hold:"#ef4444" };
 
 // ─── SUPABASE ──────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://fsrknhittjbqtbersqjd.supabase.co";
