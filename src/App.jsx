@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 const DEFAULT_STATIONS = ["Receiving","HM-51","HM-52","VM-35","JB-51","DR-31","DR-32","VM-40","CNC-01","CNC-02","Grinding","Inspection","Dispatch"];
 const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
 const PASSCODE = "1234";
-const STATUSES = ["WIP","Running"];
+const STATUSES = ["Running","WIP"];
 const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Complete:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
 
 // ─── SUPABASE ──────────────────────────────────────────────────────────────
@@ -199,14 +199,14 @@ function QRScanner({ onResult, onClose }) {
 }
 
 // ─── PRINT LABELS TAB ─────────────────────────────────────────────────────
-// 24 labels per A4, each 64x34mm, QR on left, details on right
 function PrintLabels() {
-  const emptyRow = () => ({ id:Date.now()+Math.random(), po:"", material:"", description:"", qty:"" });
+  const emptyRow = () => ({ id:Date.now()+Math.random(), po:"", material:"", description:"", qty:"", labels:1 });
   const [rows, setRows] = useState([emptyRow()]);
   const [xlsxReady, setXlsxReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
+  const [startPos, setStartPos] = useState(1); // 1-based start position on sheet
 
   useEffect(()=>{
     if (window.XLSX) { setXlsxReady(true); return; }
@@ -240,6 +240,7 @@ function PrintLabels() {
             material: get("material","material no","material no.","mat no","materialno"),
             description: get("description","material description","desc"),
             qty: get("qty","quantity","order qty"),
+            labels: 1,
           };
         }).filter(r=>r.po||r.material);
         setRows(imported.length>0 ? imported : [emptyRow()]);
@@ -249,32 +250,33 @@ function PrintLabels() {
   }
 
   const validRows = rows.filter(r=>r.po.trim()&&r.material.trim()&&r.qty.trim());
+  // Expand rows by label count: row with labels=3 becomes 3 identical label entries
+  const expandedLabels = validRows.flatMap(r => Array.from({length: Math.max(1, parseInt(r.labels)||1)}, ()=>r));
+  const totalLabels = expandedLabels.length;
+  // How many positions are available from startPos to 24
+  const availableSlots = 24 - (startPos - 1);
+  const fitsOnSheet = totalLabels <= availableSlots;
 
   async function saveAndPrint() {
-    // Save to DB
     setSaving(true);
     try {
-      const jobs = validRows.map(r=>({
-        production_number: r.po.trim(),
-        material_number: r.material.trim(),
-        description: r.description.trim(),
-        quantity: r.qty.trim(),
-        printed_date: new Date().toISOString().slice(0,10),
-        current_status: "Pending",
-        current_station: "Receiving",
-        routing: [],
-      }));
-      // Insert one by one to avoid conflict errors on duplicates
-      for (const job of jobs) {
-        try { await db.createJob(job); } catch(e) { /* already exists, skip */ }
+      for (const r of validRows) {
+        try {
+          await db.createJob({
+            production_number: r.po.trim(), material_number: r.material.trim(),
+            description: r.description.trim(), quantity: r.qty.trim(),
+            printed_date: new Date().toISOString().slice(0,10),
+            current_status: "Pending", current_station: "Receiving", routing: [],
+          });
+        } catch(e) { /* duplicate, skip */ }
       }
       setSaved(true);
-    } catch(e) { console.warn("DB save error:", e.message); }
+    } catch(e) { console.warn("DB save:", e.message); }
     setSaving(false);
     setShowPrint(true);
   }
 
-  if (showPrint) return <LabelPrintPage rows={validRows} onBack={()=>setShowPrint(false)} />;
+  if (showPrint) return <LabelPrintPage rows={expandedLabels} startPos={startPos} onBack={()=>setShowPrint(false)} />;
 
   return (
     <div style={{ padding:16 }}>
@@ -289,7 +291,7 @@ function PrintLabels() {
           </label>
           <button style={S.btn("ghost")} onClick={addRow}>+ ADD ROW</button>
           <div style={{ fontFamily:"monospace", fontSize:10, color:"#555", marginLeft:"auto" }}>
-            {validRows.length} valid label{validRows.length!==1?"s":""} ready
+            {totalLabels} label{totalLabels!==1?"s":""} total
           </div>
         </div>
         <div style={{ fontFamily:"monospace", fontSize:10, color:"#444", marginTop:8 }}>
@@ -302,7 +304,7 @@ function PrintLabels() {
         <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"monospace", fontSize:12 }}>
           <thead>
             <tr style={{ background:"#111" }}>
-              {["PO No *","Material No *","Description","Qty *",""].map(h=>(
+              {["PO No *","Material No *","Description","Qty *","No. of Labels",""].map(h=>(
                 <th key={h} style={{ padding:"8px 10px", textAlign:"left", color:"#555", fontWeight:700, borderBottom:"1px solid #2a2a2a", fontSize:10, whiteSpace:"nowrap" }}>{h}</th>
               ))}
             </tr>
@@ -319,8 +321,11 @@ function PrintLabels() {
                 <td style={{ padding:"4px 6px" }}>
                   <input value={row.description} onChange={e=>updateRow(row.id,"description",e.target.value)} style={{ ...S.input, padding:"6px 8px", fontSize:12 }} placeholder="Wheel head body…" />
                 </td>
-                <td style={{ padding:"4px 6px", width:90 }}>
-                  <input value={row.qty} onChange={e=>updateRow(row.id,"qty",e.target.value)} style={{ ...S.input, padding:"6px 8px", fontSize:12 }} placeholder="3 Nos" />
+                <td style={{ padding:"4px 6px", width:80 }}>
+                  <input value={row.qty} onChange={e=>updateRow(row.id,"qty",e.target.value)} style={{ ...S.input, padding:"6px 8px", fontSize:12 }} placeholder="50 Nos" />
+                </td>
+                <td style={{ padding:"4px 6px", width:80 }}>
+                  <input type="number" min="1" max="24" value={row.labels} onChange={e=>updateRow(row.id,"labels",e.target.value)} style={{ ...S.input, padding:"6px 8px", fontSize:12, textAlign:"center" }} />
                 </td>
                 <td style={{ padding:"4px 6px", width:36, textAlign:"center" }}>
                   <button onClick={()=>removeRow(row.id)} style={{ background:"none", border:"none", color:"#555", cursor:"pointer", fontSize:14, padding:4 }}>✕</button>
@@ -331,67 +336,113 @@ function PrintLabels() {
         </table>
       </div>
 
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-        <button
-          style={{ ...S.btn("primary"), flex:1, padding:"14px", fontSize:13 }}
-          onClick={saveAndPrint}
-          disabled={validRows.length===0||saving}
-        >
-          {saving ? "SAVING…" : `🖨  GENERATE ${validRows.length} LABELS & PRINT`}
-        </button>
+      {/* Start position picker */}
+      <div style={{ ...S.card, marginBottom:14 }}>
+        <div style={{ fontFamily:"monospace", fontSize:11, color:"#888", marginBottom:10, fontWeight:700 }}>
+          START POSITION ON SHEET
+        </div>
+        <div style={{ fontFamily:"monospace", fontSize:10, color:"#555", marginBottom:12 }}>
+          Select which label slot to start from (use this to continue on a partially-used sheet)
+        </div>
+        {/* Visual 3×8 grid picker */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:4, maxWidth:280 }}>
+          {Array.from({length:24}).map((_,i)=>{
+            const pos = i+1;
+            const isStart = pos === startPos;
+            const isUsed = pos < startPos;
+            const willPrint = pos >= startPos && pos < startPos + totalLabels;
+            let bg = "#111", color = "#444", border = "1px solid #222";
+            if (isUsed) { bg="#0a0a0a"; color="#2a2a2a"; border="1px solid #1a1a1a"; }
+            if (willPrint) { bg="#d4a85322"; color="#d4a853"; border="1px solid #d4a85366"; }
+            if (isStart) { bg="#d4a853"; color="#0f0f0f"; border="1px solid #d4a853"; }
+            return (
+              <button
+                key={pos}
+                onClick={()=>setStartPos(pos)}
+                style={{ padding:"6px 4px", borderRadius:3, fontFamily:"monospace", fontSize:10, fontWeight:700, cursor:"pointer", bg, color, border, background:bg, textAlign:"center", transition:"all .1s" }}
+              >
+                {isUsed ? "—" : pos}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display:"flex", gap:16, marginTop:10, fontFamily:"monospace", fontSize:10 }}>
+          <span><span style={{ display:"inline-block", width:10, height:10, background:"#d4a853", borderRadius:2, marginRight:4 }}></span>Start</span>
+          <span><span style={{ display:"inline-block", width:10, height:10, background:"#d4a85322", border:"1px solid #d4a85366", borderRadius:2, marginRight:4 }}></span>Will print</span>
+          <span><span style={{ display:"inline-block", width:10, height:10, background:"#111", border:"1px solid #222", borderRadius:2, marginRight:4 }}></span>Empty</span>
+          <span><span style={{ display:"inline-block", width:10, height:10, background:"#0a0a0a", border:"1px solid #1a1a1a", borderRadius:2, marginRight:4 }}></span>Already used</span>
+        </div>
+        {!fitsOnSheet && totalLabels > 0 && (
+          <div style={{ ...S.warn, marginTop:10, marginBottom:0 }}>
+            ⚠ {totalLabels} labels from position {startPos} needs {totalLabels - availableSlots} more slot{totalLabels-availableSlots!==1?"s":""} — will overflow to next sheet automatically.
+          </div>
+        )}
       </div>
+
+      <button
+        style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13 }}
+        onClick={saveAndPrint}
+        disabled={validRows.length===0||saving}
+      >
+        {saving ? "SAVING…" : `🖨  PRINT ${totalLabels} LABEL${totalLabels!==1?"S":""} STARTING AT POSITION ${startPos}`}
+      </button>
       {saved && <div style={{ fontFamily:"monospace", fontSize:11, color:"#22c55e", marginTop:8, textAlign:"center" }}>✓ Saved to database</div>}
     </div>
   );
 }
 
 // ─── LABEL PRINT PAGE ─────────────────────────────────────────────────────
-function LabelPrintPage({ rows, onBack }) {
-  // 24 labels per A4 — 3 columns × 8 rows, each 64×34mm
-  // We repeat rows cyclically to fill 24 labels (one sheet)
-  // If more than 24, we generate multiple sheets (groups of 24)
+function LabelPrintPage({ rows, startPos, onBack }) {
+  // Build 24-slot array: empty before startPos, then labels, empty after
+  // If labels overflow 24, continue onto next sheet
+  const allSlots = [];
+  const offset = startPos - 1; // 0-based
+  for (let i = 0; i < offset; i++) allSlots.push(null); // empty slots before start
+  rows.forEach(r => allSlots.push(r));
+
+  // Split into sheets of 24
   const sheets = [];
-  for (let i = 0; i < rows.length; i += 24) {
-    sheets.push(rows.slice(i, i+24));
+  for (let i = 0; i < allSlots.length; i += 24) {
+    sheets.push(allSlots.slice(i, i+24));
   }
+  // Pad last sheet to 24
+  const last = sheets[sheets.length-1];
+  while (last && last.length < 24) last.push(null);
+
+  const totalLabels = rows.length;
 
   return (
     <div>
-      {/* Screen controls — hidden on print */}
-      <div className="no-print" style={{ padding:16, display:"flex", gap:8, alignItems:"center", background:"#1a1a1a", borderBottom:"1px solid #2a2a2a" }}>
+      <div className="no-print" style={{ padding:16, display:"flex", gap:8, alignItems:"center", background:"#1a1a1a", borderBottom:"1px solid #2a2a2a", flexWrap:"wrap" }}>
         <button style={S.btn("ghost")} onClick={onBack}>← BACK</button>
         <button style={{ ...S.btn("primary"), padding:"10px 24px" }} onClick={()=>window.print()}>🖨  PRINT / SAVE PDF</button>
         <div style={{ fontFamily:"monospace", fontSize:11, color:"#888", marginLeft:8 }}>
-          {rows.length} labels · {sheets.length} sheet{sheets.length!==1?"s":""} · Set paper to A4, no margins
+          {totalLabels} labels · starting at position {startPos} · {sheets.length} sheet{sheets.length!==1?"s":""}
         </div>
       </div>
-
-      {/* Print instruction */}
-      <div className="no-print" style={{ padding:"10px 16px", background:"#111", borderBottom:"1px solid #1a1a1a" }}>
+      <div className="no-print" style={{ padding:"8px 16px", background:"#111", borderBottom:"1px solid #1a1a1a" }}>
         <div style={{ fontFamily:"monospace", fontSize:10, color:"#555" }}>
           ⚙ Print settings: Paper = A4 · Margins = None · Scale = 100% · Background graphics ON
         </div>
       </div>
 
-      {/* Label sheets */}
       <div id="label-sheets">
-        {sheets.map((sheetRows, si)=>(
+        {sheets.map((sheetSlots, si)=>(
           <div key={si} className="label-sheet">
             <div className="label-grid">
-              {/* Always render 24 cells; empty if fewer rows */}
               {Array.from({length:24}).map((_,li)=>{
-                const row = sheetRows[li];
-                if (!row) return <div key={li} className="label-cell label-empty" />;
-                const qrData = encodeQR({ production_number:row.po, material_number:row.material, quantity:row.qty, description:row.description });
+                const slot = sheetSlots[li];
+                if (!slot) return <div key={li} className="label-cell label-empty" />;
+                const qrData = encodeQR({ production_number:slot.po, material_number:slot.material, quantity:slot.qty, description:slot.description });
                 const qrUrl = generateQRDataURL(qrData);
-                const shortDesc = (row.description||"").length>40 ? row.description.slice(0,38)+"…" : (row.description||"");
+                const shortDesc = (slot.description||"").length>40 ? slot.description.slice(0,38)+"…" : (slot.description||"");
                 return (
                   <div key={li} className="label-cell">
                     <img src={qrUrl} alt="QR" className="label-qr" />
                     <div className="label-details">
-                      <div className="label-po">{row.po}</div>
-                      <div className="label-row"><span className="label-key">MAT:</span> <span className="label-val">{row.material}</span></div>
-                      <div className="label-row"><span className="label-key">QTY:</span> <span className="label-val">{row.qty}</span></div>
+                      <div className="label-po">{slot.po}</div>
+                      <div className="label-row"><span className="label-key">MAT:</span><span className="label-val">{slot.material}</span></div>
+                      <div className="label-row"><span className="label-key">QTY:</span><span className="label-val">{slot.qty}</span></div>
                       {shortDesc && <div className="label-desc">{shortDesc}</div>}
                     </div>
                   </div>
@@ -403,117 +454,27 @@ function LabelPrintPage({ rows, onBack }) {
       </div>
 
       <style>{`
-        /* ── SCREEN PREVIEW ── */
-        .label-sheet {
-          background: white;
-          width: 210mm;
-          min-height: 297mm;
-          margin: 16px auto;
-          box-shadow: 0 2px 20px rgba(0,0,0,0.5);
-          padding: 5mm;
-          box-sizing: border-box;
-        }
-        .label-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 64mm);
-          grid-template-rows: repeat(8, 34mm);
-          gap: 0;
-          width: 192mm;
-          margin: 0 auto;
-        }
-        .label-cell {
-          width: 64mm;
-          height: 34mm;
-          border: 0.3mm solid #ccc;
-          display: flex;
-          flex-direction: row;
-          align-items: center;
-          padding: 2mm;
-          box-sizing: border-box;
-          overflow: hidden;
-          gap: 2mm;
-          page-break-inside: avoid;
-        }
-        .label-empty {
-          border: 0.3mm dashed #eee;
-        }
-        .label-qr {
-          width: 28mm;
-          height: 28mm;
-          flex-shrink: 0;
-          object-fit: contain;
-        }
-        .label-details {
-          flex: 1;
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
-          gap: 0.8mm;
-        }
-        .label-po {
-          font-family: 'Courier New', monospace;
-          font-size: 7.5pt;
-          font-weight: 900;
-          color: #000;
-          line-height: 1.1;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .label-row {
-          font-family: 'Courier New', monospace;
-          font-size: 6.5pt;
-          color: #000;
-          line-height: 1.2;
-          display: flex;
-          gap: 1mm;
-        }
-        .label-key {
-          color: #666;
-          flex-shrink: 0;
-          font-weight: 700;
-        }
-        .label-val {
-          font-weight: 700;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .label-desc {
-          font-family: 'Courier New', monospace;
-          font-size: 5.5pt;
-          color: #444;
-          line-height: 1.2;
-          overflow: hidden;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-        }
-
-        /* ── PRINT STYLES ── */
+        .label-sheet { background:white; width:210mm; min-height:297mm; margin:16px auto; box-shadow:0 2px 20px rgba(0,0,0,0.5); padding:5mm; box-sizing:border-box; }
+        .label-grid { display:grid; grid-template-columns:repeat(3,64mm); grid-template-rows:repeat(8,34mm); gap:0; width:192mm; margin:0 auto; }
+        .label-cell { width:64mm; height:34mm; border:0.3mm solid #ccc; display:flex; flex-direction:row; align-items:center; padding:2mm; box-sizing:border-box; overflow:hidden; gap:2mm; page-break-inside:avoid; }
+        .label-empty { border:0.3mm dashed #f0f0f0; }
+        .label-qr { width:28mm; height:28mm; flex-shrink:0; object-fit:contain; }
+        .label-details { flex:1; overflow:hidden; display:flex; flex-direction:column; gap:0.8mm; }
+        .label-po { font-family:'Courier New',monospace; font-size:7.5pt; font-weight:900; color:#000; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .label-row { font-family:'Courier New',monospace; font-size:6.5pt; color:#000; line-height:1.2; display:flex; gap:1mm; }
+        .label-key { color:#666; flex-shrink:0; font-weight:700; }
+        .label-val { font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .label-desc { font-family:'Courier New',monospace; font-size:5.5pt; color:#444; line-height:1.2; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
         @media print {
-          body * { visibility: hidden; }
-          #label-sheets, #label-sheets * { visibility: visible; }
-          #label-sheets { position: fixed; top: 0; left: 0; width: 100%; }
-          .no-print { display: none !important; }
-          .label-sheet {
-            width: 210mm;
-            min-height: 297mm;
-            margin: 0;
-            padding: 5mm;
-            box-shadow: none;
-            page-break-after: always;
-          }
-          .label-grid {
-            grid-template-columns: repeat(3, 64mm);
-            grid-template-rows: repeat(8, 34mm);
-          }
-          .label-cell {
-            border: 0.3mm solid #999;
-            page-break-inside: avoid;
-          }
-          .label-empty { border: none; }
-          @page { size: A4; margin: 0; }
+          body * { visibility:hidden; }
+          #label-sheets, #label-sheets * { visibility:visible; }
+          #label-sheets { position:fixed; top:0; left:0; width:100%; }
+          .no-print { display:none !important; }
+          .label-sheet { width:210mm; min-height:297mm; margin:0; padding:5mm; box-shadow:none; page-break-after:always; }
+          .label-grid { grid-template-columns:repeat(3,64mm); grid-template-rows:repeat(8,34mm); }
+          .label-cell { border:0.3mm solid #999; page-break-inside:avoid; }
+          .label-empty { border:none; }
+          @page { size:A4; margin:0; }
         }
       `}</style>
     </div>
