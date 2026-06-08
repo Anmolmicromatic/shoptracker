@@ -422,7 +422,7 @@ function LabelPrintPage({ rows, startPos, onBack }) {
       </div>
       <div className="no-print" style={{ padding:"8px 16px", background:"#111", borderBottom:"1px solid #1a1a1a" }}>
         <div style={{ fontFamily:"monospace", fontSize:10, color:"#555" }}>
-          ⚙ Print settings: Paper = A4 · Margins = None · Scale = 100% · Background graphics ON
+          ⚙ Oddy ST-24 A4100 · Paper = A4 Portrait · Margins = None (0mm all sides) · Scale = 100% · Background graphics ON · Word ref: L-7159
         </div>
       </div>
 
@@ -454,27 +454,71 @@ function LabelPrintPage({ rows, startPos, onBack }) {
       </div>
 
       <style>{`
-        .label-sheet { background:white; width:210mm; min-height:297mm; margin:16px auto; box-shadow:0 2px 20px rgba(0,0,0,0.5); padding:5mm; box-sizing:border-box; }
-        .label-grid { display:grid; grid-template-columns:repeat(3,64mm); grid-template-rows:repeat(8,34mm); gap:0; width:192mm; margin:0 auto; }
-        .label-cell { width:64mm; height:34mm; border:0.3mm solid #ccc; display:flex; flex-direction:row; align-items:center; padding:2mm; box-sizing:border-box; overflow:hidden; gap:2mm; page-break-inside:avoid; }
-        .label-empty { border:0.3mm dashed #f0f0f0; }
-        .label-qr { width:28mm; height:28mm; flex-shrink:0; object-fit:contain; }
-        .label-details { flex:1; overflow:hidden; display:flex; flex-direction:column; gap:0.8mm; }
+        /* ── Oddy ST-24 A4100 exact specs ── */
+        /* Top margin: 12.979mm | Left margin: 4.597mm */
+        /* Label: 64×34mm | H-pitch: 66.472mm | V-pitch: 33.858mm */
+        /* Col gap: 2.472mm | Row gap: ~0mm (labels touch) */
+        .label-sheet {
+          background: white;
+          width: 210mm;
+          height: 297mm;
+          margin: 16px auto;
+          box-shadow: 0 2px 20px rgba(0,0,0,0.5);
+          box-sizing: border-box;
+          position: relative;
+          overflow: hidden;
+        }
+        .label-grid {
+          position: absolute;
+          top: 12.979mm;
+          left: 4.597mm;
+          display: grid;
+          grid-template-columns: repeat(3, 64mm);
+          grid-template-rows: repeat(8, 34mm);
+          column-gap: 2.472mm;
+          row-gap: 0mm;
+        }
+        .label-cell {
+          width: 64mm;
+          height: 34mm;
+          border: 0.2mm solid #ccc;
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          padding: 1.5mm 2mm;
+          box-sizing: border-box;
+          overflow: hidden;
+          gap: 1.5mm;
+        }
+        .label-empty { border: 0.2mm dashed #eee; }
+        .label-qr { width: 28mm; height: 28mm; flex-shrink: 0; object-fit: contain; }
+        .label-details { flex:1; overflow:hidden; display:flex; flex-direction:column; gap:0.7mm; }
         .label-po { font-family:'Courier New',monospace; font-size:7.5pt; font-weight:900; color:#000; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .label-row { font-family:'Courier New',monospace; font-size:6.5pt; color:#000; line-height:1.2; display:flex; gap:1mm; }
-        .label-key { color:#666; flex-shrink:0; font-weight:700; }
+        .label-key { color:#555; flex-shrink:0; font-weight:700; }
         .label-val { font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .label-desc { font-family:'Courier New',monospace; font-size:5.5pt; color:#444; line-height:1.2; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+        .label-desc { font-family:'Courier New',monospace; font-size:5pt; color:#444; line-height:1.2; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
         @media print {
-          body * { visibility:hidden; }
-          #label-sheets, #label-sheets * { visibility:visible; }
-          #label-sheets { position:fixed; top:0; left:0; width:100%; }
-          .no-print { display:none !important; }
-          .label-sheet { width:210mm; min-height:297mm; margin:0; padding:5mm; box-shadow:none; page-break-after:always; }
-          .label-grid { grid-template-columns:repeat(3,64mm); grid-template-rows:repeat(8,34mm); }
-          .label-cell { border:0.3mm solid #999; page-break-inside:avoid; }
-          .label-empty { border:none; }
-          @page { size:A4; margin:0; }
+          body * { visibility: hidden; }
+          #label-sheets, #label-sheets * { visibility: visible; }
+          #label-sheets { position: fixed; top: 0; left: 0; width: 100%; }
+          .no-print { display: none !important; }
+          .label-sheet {
+            width: 210mm;
+            height: 297mm;
+            margin: 0;
+            box-shadow: none;
+            page-break-after: always;
+          }
+          .label-grid {
+            top: 12.979mm;
+            left: 4.597mm;
+            column-gap: 2.472mm;
+            row-gap: 0mm;
+          }
+          .label-cell { border: 0.2mm solid #bbb; }
+          .label-empty { border: none; }
+          @page { size: A4 portrait; margin: 0mm; }
         }
       `}</style>
     </div>
