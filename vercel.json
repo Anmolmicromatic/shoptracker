@@ -1,6 +1,8 @@
 {
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "functions": {
-    "api/generate-labels.js": {
+    "api/*.js": {
       "memory": 512,
       "maxDuration": 30
     }
