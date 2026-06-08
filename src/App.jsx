@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 const DEFAULT_STATIONS = ["Receiving","HM-51","HM-52","VM-35","JB-51","DR-31","DR-32","VM-40","CNC-01","CNC-02","Grinding","Inspection","Dispatch"];
 const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
 const PASSCODE = "1234";
-const STATUSES = ["Running","WIP"];
+const STATUSES = ["Running","WIP","Complete","Hold","Pending"];
 const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Complete:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
 
 // ─── SUPABASE ──────────────────────────────────────────────────────────────
@@ -470,8 +470,8 @@ function LabelPrintPage({ rows, startPos, onBack }) {
         }
         .label-grid {
           position: absolute;
-          top: 10mm;
-          left: 5mm;
+          top: 0mm;
+          left: 1mm;
           display: grid;
           grid-template-columns: repeat(3, 64mm);
           grid-template-rows: repeat(8, 34mm);
@@ -511,8 +511,8 @@ function LabelPrintPage({ rows, startPos, onBack }) {
             page-break-after: always;
           }
           .label-grid {
-            top: 10mm;
-            left: 5mm;
+            top: 0mm;
+            left: 1mm;
             column-gap: 4mm;
             row-gap: 0mm;
           }
