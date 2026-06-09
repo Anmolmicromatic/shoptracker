@@ -636,7 +636,7 @@ function LogUpdate({ stations, supervisors, onSaved }) {
   const [stationMode, setStationMode] = useState("dropdown");
   // Step 3 — Status & Supervisor
   const [status, setStatus] = useState("WIP");
-  const [supervisor, setSupervisor] = useState(supervisors[0]||"");
+  const [supervisor, setSupervisor] = useState("");
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [step, setStep] = useState(1);
