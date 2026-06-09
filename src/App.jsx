@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 
 // ─── HARDCODED FALLBACKS ───────────────────────────────────────────────────
-const DEFAULT_STATIONS = ["Receiving","HM-51","HM-52","VM-35","JB-51","DR-31","DR-32","VM-40","CNC-01","CNC-02","Grinding","Inspection","Dispatch"];
+const DEFAULT_STATIONS = ["BL-01","BM-01","BM-03","CG-21","Contractor","Other","DR-31","DR-33","DR-34","FT_T","GC-21","GC-23","GC-31","GC-32","GC-33","GC-34","GC-51","HM-51","HM-52","JB-51","Leak test","LT-34","LT-35","MR-22","MR-23","MV-34","MV-36","Paint/Primer","QA_MFG","REC","SG-21","SG-31","SG-32","SG-33","SG-52","SH-21","TL-32","TL-33","TL-34","VNDR","VM-31","VM-32","VM-33","VM-34","VM-35"];
 const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
 const PASSCODE = "1234";
 const STATUSES = ["Running","WIP","Complete","Hold","Pending"];
-const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Complete:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
+const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Completed:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
 
 // ─── SUPABASE ──────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://fsrknhittjbqtbersqjd.supabase.co";
@@ -295,10 +295,10 @@ function PrintLabels() {
   .label.empty { border:0.3mm dashed #ddd; }
   .label-text { flex:1; overflow:hidden; display:flex; flex-direction:column; justify-content:center; gap:0.8mm; min-width:0; }
   .label-po { font-size:8pt; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
-  .label-line { font-size:7.5pt; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
-  .label-line span { color:#666; font-weight:400; }
-  .label-desc { font-size:6.5pt; color:#333; font-weight:600; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; white-space:normal; word-break:break-word; }
-  .label-qr { width:20mm; height:20mm; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+  .label-line { font-size:7.5pt; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
+  .label-line span { color:#555; font-weight:700; }
+  .label-desc { font-size:6.5pt; color:#333; font-weight:900; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; white-space:normal; word-break:break-word; }
+  .label-qr { width:20mm; height:20mm; flex-shrink:0; display:flex; align-items:center; justify-content:center; margin-right:3mm; }
   .label-qr canvas, .label-qr img { width:20mm !important; height:20mm !important; display:block; }
   @media print {
     @page { size:A4 portrait; margin:0mm; }
@@ -1159,7 +1159,7 @@ function BulkImport() {
 
 // ─── ROOT APP ──────────────────────────────────────────────────────────────
 export default function App() {
-  const [unlocked, setUnlocked] = useState(false);
+  const [unlocked, setUnlocked] = useState(true);
   const [page, setPage] = useState("log");
   const [stations, setStations] = useState(DEFAULT_STATIONS);
   const [supervisors, setSupervisors] = useState(DEFAULT_SUPERVISORS);
@@ -1178,7 +1178,7 @@ export default function App() {
     }).catch(()=>{});
   },[unlocked]);
 
-  if (!unlocked) return <PasscodeGate onUnlock={()=>setUnlocked(true)} />;
+  // Passcode removed
 
   const TABS = [
     { id:"log",    label:"LOG UPDATE" },
