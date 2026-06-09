@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from "react";
 
 // ─── HARDCODED FALLBACKS ───────────────────────────────────────────────────
 const DEFAULT_STATIONS = ["BL-01","BM-01","BM-03","CG-21","Contractor","Other","DR-31","DR-33","DR-34","FT_T","GC-21","GC-23","GC-31","GC-32","GC-33","GC-34","GC-51","HM-51","HM-52","JB-51","Leak test","LT-34","LT-35","MR-22","MR-23","MV-34","MV-36","Paint/Primer","QA_MFG","REC","SG-21","SG-31","SG-32","SG-33","SG-52","SH-21","TL-32","TL-33","TL-34","VNDR","VM-31","VM-32","VM-33","VM-34","VM-35"];
-const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Other"];
+const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
 const PASSCODE = "1234";
-const STATUSES = ["Running","WIP","Complete","Hold"];
-const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Completed:"#8b5cf6", Hold:"#ef4444"};
+const STATUSES = ["Running","WIP","Completed","Hold"];
+const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Completed:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
 
 // ─── SUPABASE ──────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://fsrknhittjbqtbersqjd.supabase.co";
@@ -662,7 +662,7 @@ function LogUpdate({ stations, supervisors, onSaved }) {
   }
 
   async function save() {
-    if (!po.trim()||!effectiveStation||!supervisor) return;
+    if (!po.trim()||!effectiveStation||!supervisor||!status) return;
     setSaving(true);
     try {
       await db.addUpdate({
@@ -803,7 +803,7 @@ function LogUpdate({ stations, supervisors, onSaved }) {
             <label style={S.label}>Status</label>
             <div style={{ display:"flex", gap:8, marginBottom:18 }}>
               {STATUSES.map(s=>(
-                <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, padding:"12px 8px", borderRadius:4, fontSize:12, fontFamily:"monospace", fontWeight:700, cursor:"pointer", textTransform:"uppercase", letterSpacing:"0.06em", border:`1px solid ${STATUS_COLORS[s]}`, background:status===s?STATUS_COLORS[s]:STATUS_COLORS[s]+"22", color:status===s?"#0f0f0f":STATUS_COLORS[s], transition:"all .15s" }}>
+                <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, padding:"12px 8px", borderRadius:4, fontSize:12, fontFamily:"monospace", fontWeight:700, cursor:"pointer", textTransform:"uppercase", letterSpacing:"0.06em", border:`1px solid ${status===s?STATUS_COLORS[s]:"#333"}`, background:status===s?STATUS_COLORS[s]:"#111", color:status===s?"#0f0f0f":"#888", transition:"all .15s" }}>
                   {s}
                 </button>
               ))}
@@ -811,6 +811,7 @@ function LogUpdate({ stations, supervisors, onSaved }) {
 
             <label style={S.label}>Supervisor</label>
             <select style={{ ...S.select, marginBottom:20 }} value={supervisor} onChange={e=>setSupervisor(e.target.value)}>
+              <option value=''>-- Select Supervisor --</option>
               {supervisors.map(s=><option key={s}>{s}</option>)}
             </select>
 
@@ -819,7 +820,7 @@ function LogUpdate({ stations, supervisors, onSaved }) {
               onClick={save}
               disabled={saving}
             >
-              {saving ? "SAVING…" : "✓  OK — SAVE"}
+              {saving ? "SAVING…" : !status ? "SELECT STATUS FIRST" : !supervisor ? "SELECT SUPERVISOR FIRST" : "✓  OK — SAVE"}
             </button>
           </div>
         </div>
