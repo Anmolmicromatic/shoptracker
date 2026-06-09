@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 
 // ─── HARDCODED FALLBACKS ───────────────────────────────────────────────────
 const DEFAULT_STATIONS = ["BL-01","BM-01","BM-03","CG-21","Contractor","Other","DR-31","DR-33","DR-34","FT_T","GC-21","GC-23","GC-31","GC-32","GC-33","GC-34","GC-51","HM-51","HM-52","JB-51","Leak test","LT-34","LT-35","MR-22","MR-23","MV-34","MV-36","Paint/Primer","QA_MFG","REC","SG-21","SG-31","SG-32","SG-33","SG-52","SH-21","TL-32","TL-33","TL-34","VNDR","VM-31","VM-32","VM-33","VM-34","VM-35"];
-const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
+const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Other"];
 const PASSCODE = "1234";
 const STATUSES = ["Running","WIP","Complete","Hold","Pending"];
 const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Completed:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
@@ -52,6 +52,8 @@ const db = {
     await sbFetch(`app_settings?key=eq.${key}`, { method:"DELETE", prefer:"return=minimal" });
     return sbFetch("app_settings", { method:"POST", body:JSON.stringify({ key, value:JSON.stringify(value) }) });
   },
+  async deleteUpdate(id) { return sbFetch(`job_updates?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }); },
+  async deleteUpdatesByPO(po) { return sbFetch(`job_updates?production_number=eq.${encodeURIComponent(po)}`, { method:"DELETE", prefer:"return=minimal" }); },
 };
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────
@@ -59,6 +61,21 @@ function encodeQR(job) {
   return [job.production_number, job.material_number, job.quantity, job.description].join("|");
 }
 function decodeQR(str) {
+  str = str.trim();
+  // Handle JSON format: {"po":"...","material":"...","qty":"..."}
+  if (str.startsWith("{")) {
+    try {
+      const obj = JSON.parse(str);
+      return {
+        production_number: obj.po||obj.productionOrder||obj.production_number||"",
+        material_number: obj.material||obj.material_no||obj.materialNo||"",
+        quantity: obj.qty||obj.quantity||"",
+        description: obj.desc||obj.description||"",
+        fromQR: true
+      };
+    } catch(e) {}
+  }
+  // Handle pipe format: PO|Material|Qty|Description
   if (str.includes("|")) {
     const parts = str.split("|");
     return {
@@ -69,7 +86,7 @@ function decodeQR(str) {
       fromQR: true
     };
   }
-  return { production_number: str.trim(), fromQR: false };
+  return { production_number: str, fromQR: false };
 }
 function generateQRDataURL(text) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(text)}`;
@@ -340,7 +357,7 @@ for (let i = 0; i < 24; i++) {
     qrDiv.id = 'qr' + i;
     cell.appendChild(qrDiv);
     grid.appendChild(cell);
-    new QRCode(document.getElementById('qr' + i), { text: JSON.stringify({po:lbl.po,material:lbl.material,qty:lbl.qty}), width:76, height:76, correctLevel:QRCode.CorrectLevel.M });
+    new QRCode(document.getElementById('qr' + i), { text: lbl.po+'|'+lbl.material+'|'+lbl.qty+'|'+(lbl.desc||''), width:76, height:76, correctLevel:QRCode.CorrectLevel.M });
   } else {
     grid.appendChild(cell);
   }
@@ -831,6 +848,14 @@ function JobStatus() {
   }
   useEffect(()=>{ load(); },[]);
 
+  async function deleteRow(po) {
+    if (!window.confirm(`Delete all records for PO: ${po}?`)) return;
+    try {
+      await db.deleteUpdatesByPO(po);
+      load();
+    } catch(e) { alert("Delete failed: "+e.message); }
+  }
+
   useEffect(()=>{
     if (!window.XLSX) {
       const s = document.createElement("script");
@@ -928,6 +953,9 @@ function JobStatus() {
                   <td style={{ padding:"8px 12px" }}><span style={S.statusPill(r.status)}>{r.status}</span></td>
                   <td style={{ padding:"8px 12px", color:"#888" }}>{r.supervisor}</td>
                   <td style={{ padding:"8px 12px", color:"#555", whiteSpace:"nowrap" }}>{fmt(r.last_updated)}</td>
+                  <td style={{ padding:"4px 8px" }}>
+                    <button onClick={()=>deleteRow(r.po)} style={{ background:"none", border:"1px solid #333", color:"#ef4444", borderRadius:3, padding:"2px 8px", cursor:"pointer", fontFamily:"monospace", fontSize:10 }}>✕</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
