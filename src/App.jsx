@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from "react";
 const DEFAULT_STATIONS = ["BL-01","BM-01","BM-03","CG-21","Contractor","Other","DR-31","DR-33","DR-34","FT_T","GC-21","GC-23","GC-31","GC-32","GC-33","GC-34","GC-51","HM-51","HM-52","JB-51","Leak test","LT-34","LT-35","MR-22","MR-23","MV-34","MV-36","Paint/Primer","QA_MFG","REC","SG-21","SG-31","SG-32","SG-33","SG-52","SH-21","TL-32","TL-33","TL-34","VNDR","VM-31","VM-32","VM-33","VM-34","VM-35"];
 const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Other"];
 const PASSCODE = "1234";
-const STATUSES = ["Running","WIP","Complete","Hold","Pending"];
-const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Completed:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
+const STATUSES = ["Running","WIP","Complete","Hold"];
+const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Completed:"#8b5cf6", Hold:"#ef4444"};
 
 // ─── SUPABASE ──────────────────────────────────────────────────────────────
 const SUPABASE_URL = "https://fsrknhittjbqtbersqjd.supabase.co";
