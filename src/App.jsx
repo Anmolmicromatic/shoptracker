@@ -343,8 +343,8 @@ function PrintLabels() {
       'body { background:#f0f0f0; font-family:Courier New,monospace; }' +
       '.ctrl { padding:16px; background:#1a1a1a; color:#d4a853; display:flex; gap:12px; align-items:center; }' +
       '.ctrl button { background:#d4a853; color:#000; border:none; padding:10px 20px; font-weight:bold; cursor:pointer; font-family:monospace; font-size:13px; border-radius:3px; }' +
-      '.sheet { width:210mm; background:white; margin:20px auto; position:relative; box-shadow:0 2px 20px rgba(0,0,0,0.3); min-height:297mm; }' +
-      '.grid { position:absolute; top:16.479mm; left:7.597mm; display:grid; grid-template-columns:64mm 64mm 64mm; grid-auto-rows:34mm; column-gap:2.472mm; row-gap:0mm; }' +
+      '.sheet { width:210mm; background:white; margin:20px auto; box-shadow:0 2px 20px rgba(0,0,0,0.3); padding-top:16.479mm; padding-left:7.597mm; padding-bottom:10mm; }' +
+      '.grid { display:grid; grid-template-columns:64mm 64mm 64mm; grid-auto-rows:34mm; column-gap:2.472mm; row-gap:0mm; }' +
       '.lbl { width:64mm; height:34mm; border:0.3mm solid #999; display:flex; align-items:center; padding:2mm 3mm 2mm 4mm; gap:1.5mm; overflow:hidden; }' +
       '.lbl.empty { border:0.3mm dashed #eee; }' +
       '.ltxt { flex:1; overflow:hidden; display:flex; flex-direction:column; justify-content:center; gap:0.8mm; min-width:0; }' +
