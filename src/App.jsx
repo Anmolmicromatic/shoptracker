@@ -437,8 +437,7 @@ for (let i = 0; i < 24; i++) {
             </div>
             <textarea
               style={{ ...S.input, minHeight:120, fontSize:11, resize:"vertical", fontFamily:"monospace" }}
-              placeholder={"P.O Number	Material	Description	Qty
-100031646	M161501	Wheel Head Body	1"}
+              placeholder="PO | Material | Description | Qty"
               onPaste={e=>{
                 e.preventDefault();
                 const text = e.clipboardData.getData('text');
