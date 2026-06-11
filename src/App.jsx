@@ -231,6 +231,7 @@ function PrintLabels() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
+  const [pasteMode, setPasteMode] = useState(false);
   const [startPos, setStartPos] = useState(1); // 1-based start position on sheet
 
   useEffect(()=>{
@@ -272,6 +273,41 @@ function PrintLabels() {
       } catch(err) { alert("Cannot read file: "+err.message); }
     };
     reader.readAsBinaryString(file);
+  }
+
+  function parsePaste(text) {
+    const lines = text.trim().split(/
+?
+/).filter(l=>l.trim());
+    if (lines.length === 0) return;
+    // Detect if first line is a header
+    const norm = s => s.toString().toLowerCase().replace(/[^a-z0-9]/g,"");
+    const firstCells = lines[0].split('	').map(c=>norm(c.trim()));
+    const isHeader = firstCells.some(c=>["po","material","description","qty","ponumber","pono"].includes(c));
+    const dataLines = isHeader ? lines.slice(1) : lines;
+    if (dataLines.length === 0) return;
+    // Map columns from header or assume order: PO, Material, Description, Qty
+    let poIdx=0, matIdx=1, descIdx=2, qtyIdx=3;
+    if (isHeader) {
+      firstCells.forEach((c,i)=>{
+        if (["po","ponumber","pono","ponum","productionorder"].includes(c)) poIdx=i;
+        else if (["material","materialno","matno","materialnumber"].includes(c)) matIdx=i;
+        else if (["description","desc","materialdescription"].includes(c)) descIdx=i;
+        else if (["qty","quantity","orderqty"].includes(c)) qtyIdx=i;
+      });
+    }
+    const imported = dataLines.map(line=>{
+      const cells = line.split('	');
+      return {
+        id: Date.now()+Math.random(),
+        po: (cells[poIdx]||"").trim(),
+        material: (cells[matIdx]||"").trim(),
+        description: (cells[descIdx]||"").trim(),
+        qty: (cells[qtyIdx]||"").trim(),
+        labels: 1,
+      };
+    }).filter(r=>r.po||r.material);
+    if (imported.length > 0) setRows(imported);
   }
 
   const validRows = rows.filter(r=>r.po.trim()&&r.material.trim()&&r.qty.trim());
@@ -387,19 +423,42 @@ for (let i = 0; i < 24; i++) {
 
       {/* Import strip */}
       <div style={{ ...S.card, marginBottom:14, padding:"12px 16px" }}>
-        <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+        <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
           <label style={{ ...S.btn("ghost"), cursor:"pointer", position:"relative", display:"inline-block" }}>
             📂 IMPORT EXCEL
             <input type="file" accept=".xlsx,.xls,.csv" style={{ position:"absolute", inset:0, opacity:0, cursor:"pointer" }} onChange={e=>{ const f=e.target.files[0]; if(f) importExcel(f); e.target.value=""; }} />
           </label>
           <button style={S.btn("ghost")} onClick={addRow}>+ ADD ROW</button>
+          <button style={S.btn("ghost")} onClick={()=>setPasteMode(p=>!p)}>📋 PASTE FROM EXCEL</button>
           <div style={{ fontFamily:"monospace", fontSize:10, color:"#555", marginLeft:"auto" }}>
             {totalLabels} label{totalLabels!==1?"s":""} total
           </div>
         </div>
-        <div style={{ fontFamily:"monospace", fontSize:10, color:"#444", marginTop:8 }}>
-          Excel columns: PO No · Material No · Description · Qty
-        </div>
+        {pasteMode && (
+          <div>
+            <div style={{ fontFamily:"monospace", fontSize:10, color:"#f59e0b", marginBottom:6 }}>
+              1. Select your data in Excel (including header row) → Ctrl+C → click below → Ctrl+V
+            </div>
+            <textarea
+              style={{ ...S.input, minHeight:120, fontSize:11, resize:"vertical", fontFamily:"monospace" }}
+              placeholder={"P.O Number	Material	Description	Qty
+100031646	M161501	Wheel Head Body	1"}
+              onPaste={e=>{
+                e.preventDefault();
+                const text = e.clipboardData.getData('text');
+                parsePaste(text);
+                setPasteMode(false);
+              }}
+              autoFocus
+            />
+            <div style={{ fontFamily:"monospace", fontSize:10, color:"#555", marginTop:4 }}>
+              Columns detected automatically — PO, Material, Description, Qty
+            </div>
+          </div>
+        )}
+        {!pasteMode && <div style={{ fontFamily:"monospace", fontSize:10, color:"#444" }}>
+          Excel columns: PO No · Material No · Description · Qty — or paste directly from Excel
+        </div>}
       </div>
 
       {/* Table */}
