@@ -387,9 +387,10 @@ function PrintLabels() {
       '}' +
       '<\/script></body></html>';
 
-    const blob = new Blob([html], { type:'text/html' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
+    const w = window.open('', '_blank');
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
   }
 
 
