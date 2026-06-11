@@ -332,85 +332,66 @@ function PrintLabels() {
     try { await saveToDb(); setSaved(true); } catch(e) { console.warn("DB:", e.message); }
     setSaving(false);
 
-    const labelsJson = JSON.stringify(expandedLabels.map(r=>({
-      po: r.po, material: r.material, qty: r.qty, desc: r.description
-    })));
+    const data = JSON.stringify({
+      labels: expandedLabels.map(r=>({ po:r.po, material:r.material, qty:r.qty, desc:r.description||"" })),
+      startPos: startPos
+    });
 
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>ShopTracker Labels</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#f0f0f0; font-family:'Courier New',monospace; }
-  .controls { padding:16px; background:#1a1a1a; color:#d4a853; display:flex; gap:12px; align-items:center; }
-  .controls button { background:#d4a853; color:#000; border:none; padding:10px 20px; font-weight:bold; cursor:pointer; font-family:monospace; font-size:13px; border-radius:3px; }
-  .sheet { width:210mm; height:297mm; background:white; margin:20px auto; position:relative; box-shadow:0 2px 20px rgba(0,0,0,0.3); overflow:hidden; }
-  .label-grid { position:absolute; top:16.479mm; left:7.597mm; display:grid; grid-template-columns:64mm 64mm 64mm; grid-auto-rows:34mm; column-gap:2.472mm; row-gap:0mm; }
-  .label { width:64mm; height:34mm; border:0.3mm solid #999; display:flex; flex-direction:row; align-items:center; padding:2mm 3mm 2mm 4mm; gap:1.5mm; overflow:hidden; }
-  .label.empty { border:0.3mm dashed #ddd; }
-  .label-text { flex:1; overflow:hidden; display:flex; flex-direction:column; justify-content:center; gap:0.8mm; min-width:0; }
-  .label-po { font-size:8pt; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
-  .label-line { font-size:7.5pt; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
-  .label-line span { color:#555; font-weight:700; }
-  .label-desc { font-size:6.5pt; color:#333; font-weight:900; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; white-space:normal; word-break:break-word; }
-  .label-qr { width:20mm; height:20mm; flex-shrink:0; display:flex; align-items:center; justify-content:center; margin-right:3mm; }
-  .label-qr canvas, .label-qr img { width:20mm !important; height:20mm !important; display:block; }
-  @media print {
-    @page { size:A4 portrait; margin:0mm; }
-    body { background:white; }
-    .controls { display:none !important; }
-    .sheet { margin:0; box-shadow:none; width:210mm; height:297mm; }
-    .label { border:0.3mm solid #aaa; }
-    .label.empty { border:none; }
-  }
-</style>
-</head>
-<body>
-<div class="controls">
-  <strong>⚙ SHOPTRACK — ${expandedLabels.length} Label${expandedLabels.length!==1?"s":""} · Position ${startPos}</strong>
-  <button onclick="window.print()">🖨 PRINT</button>
-  <span style="font-size:11px;color:#888;">Chrome: Margins=None · Scale=100% · A4</span>
-  <button onclick="window.close()" style="background:#333;color:#aaa;margin-left:auto;">✕ CLOSE</button>
-</div>
-<div class="sheet">
-  <div class="label-grid" id="labelGrid"></div>
-</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
-<script>
-const LABELS = ${labelsJson};
-const START_POS = ${startPos};
-const TOTAL_SLOTS = Math.ceil((LABELS.length + START_POS - 1) / 24) * 24;
-const grid = document.getElementById('labelGrid');
-for (let i = 0; i < TOTAL_SLOTS; i++) {
-  const idx = i - (START_POS - 1);
-  const lbl = (idx >= 0 && idx < LABELS.length) ? LABELS[idx] : null;
-  const cell = document.createElement('div');
-  cell.className = 'label' + (lbl ? '' : ' empty');
-  if (lbl) {
-    const txt = document.createElement('div');
-    txt.className = 'label-text';
-    txt.innerHTML = '<div class="label-po">PO: ' + lbl.po + '</div><div class="label-line"><span>MAT: </span>' + lbl.material + '</div><div class="label-line"><span>QTY: </span>' + lbl.qty + '</div><div class="label-desc">' + (lbl.desc||'') + '</div>';
-    cell.appendChild(txt);
-    const qrDiv = document.createElement('div');
-    qrDiv.className = 'label-qr';
-    qrDiv.id = 'qr' + i;
-    cell.appendChild(qrDiv);
-    grid.appendChild(cell);
-    new QRCode(document.getElementById('qr' + i), { text: lbl.po+'|'+lbl.material+'|'+lbl.qty+'|'+(lbl.desc||''), width:76, height:76, correctLevel:QRCode.CorrectLevel.M });
-  } else {
-    grid.appendChild(cell);
-  }
-}
-<\/script>
-</body>
-</html>`;
+    const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Labels</title>' +
+      '<style>' +
+      '* { margin:0; padding:0; box-sizing:border-box; }' +
+      'body { background:#f0f0f0; font-family:Courier New,monospace; }' +
+      '.ctrl { padding:16px; background:#1a1a1a; color:#d4a853; display:flex; gap:12px; align-items:center; }' +
+      '.ctrl button { background:#d4a853; color:#000; border:none; padding:10px 20px; font-weight:bold; cursor:pointer; font-family:monospace; font-size:13px; border-radius:3px; }' +
+      '.sheet { width:210mm; background:white; margin:20px auto; position:relative; box-shadow:0 2px 20px rgba(0,0,0,0.3); min-height:297mm; }' +
+      '.grid { position:absolute; top:16.479mm; left:7.597mm; display:grid; grid-template-columns:64mm 64mm 64mm; grid-auto-rows:34mm; column-gap:2.472mm; row-gap:0mm; }' +
+      '.lbl { width:64mm; height:34mm; border:0.3mm solid #999; display:flex; align-items:center; padding:2mm 3mm 2mm 4mm; gap:1.5mm; overflow:hidden; }' +
+      '.lbl.empty { border:0.3mm dashed #eee; }' +
+      '.ltxt { flex:1; overflow:hidden; display:flex; flex-direction:column; justify-content:center; gap:0.8mm; min-width:0; }' +
+      '.lpo { font-size:8pt; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }' +
+      '.lline { font-size:7.5pt; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }' +
+      '.lline span { color:#555; font-weight:700; }' +
+      '.ldesc { font-size:6.5pt; color:#333; font-weight:700; line-height:1.3; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; white-space:normal; word-break:break-word; }' +
+      '.lqr { width:20mm; height:20mm; flex-shrink:0; display:flex; align-items:center; justify-content:center; margin-right:3mm; }' +
+      '.lqr canvas, .lqr img { width:20mm !important; height:20mm !important; display:block; }' +
+      '@media print { @page { size:A4 portrait; margin:0mm; } body { background:white; } .ctrl { display:none !important; } .sheet { margin:0; box-shadow:none; } .lbl { border:0.3mm solid #aaa; } .lbl.empty { border:none; } }' +
+      '</style></head><body>' +
+      '<div class="ctrl">' +
+      '<strong>SHOPTRACK LABELS</strong>' +
+      '<button onclick="window.print()">PRINT</button>' +
+      '<span style="font-size:11px;color:#888;">Chrome: Margins=None / Scale=100% / A4</span>' +
+      '<button onclick="window.close()" style="background:#333;color:#aaa;margin-left:auto;">X CLOSE</button>' +
+      '</div>' +
+      '<div class="sheet"><div class="grid" id="g"></div></div>' +
+      '<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>' +
+      '<script>' +
+      'var D=' + data + ';' +
+      'var g=document.getElementById("g");' +
+      'var total=Math.ceil((D.labels.length+D.startPos-1)/24)*24;' +
+      'for(var i=0;i<total;i++){' +
+      '  var idx=i-(D.startPos-1);' +
+      '  var l=(idx>=0&&idx<D.labels.length)?D.labels[idx]:null;' +
+      '  var c=document.createElement("div");' +
+      '  c.className=l?"lbl":"lbl empty";' +
+      '  if(l){' +
+      '    var t=document.createElement("div");' +
+      '    t.className="ltxt";' +
+      '    t.innerHTML="<div class=\"lpo\">PO: "+l.po+"</div><div class=\"lline\"><span>MAT: </span>"+l.material+"</div><div class=\"lline\"><span>QTY: </span>"+l.qty+"</div><div class=\"ldesc\">"+l.desc+"</div>";' +
+      '    c.appendChild(t);' +
+      '    var q=document.createElement("div");' +
+      '    q.className="lqr";q.id="q"+i;' +
+      '    c.appendChild(q);' +
+      '    g.appendChild(c);' +
+      '    new QRCode(document.getElementById("q"+i),{text:l.po+"|"+l.material+"|"+l.qty+"|"+l.desc,width:76,height:76,correctLevel:QRCode.CorrectLevel.M});' +
+      '  } else { g.appendChild(c); }' +
+      '}' +
+      '<\/script></body></html>';
 
     const blob = new Blob([html], { type:'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
   }
+
 
   if (showPrint) return <LabelPrintPage rows={expandedLabels} startPos={startPos} onBack={()=>setShowPrint(false)} />;
 
