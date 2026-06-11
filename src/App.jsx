@@ -276,17 +276,13 @@ function PrintLabels() {
   }
 
   function parsePaste(text) {
-    const lines = text.trim().split(/
-?
-/).filter(l=>l.trim());
+    const lines = text.trim().split(/\r?\n/).filter(l=>l.trim());
     if (lines.length === 0) return;
-    // Detect if first line is a header
     const norm = s => s.toString().toLowerCase().replace(/[^a-z0-9]/g,"");
-    const firstCells = lines[0].split('	').map(c=>norm(c.trim()));
-    const isHeader = firstCells.some(c=>["po","material","description","qty","ponumber","pono"].includes(c));
+    const firstCells = lines[0].split('\t').map(c=>norm(c.trim()));
+    const isHeader = firstCells.some(c=>["po","material","description","qty","ponumber","pono","ponum","ponumber"].includes(c));
     const dataLines = isHeader ? lines.slice(1) : lines;
     if (dataLines.length === 0) return;
-    // Map columns from header or assume order: PO, Material, Description, Qty
     let poIdx=0, matIdx=1, descIdx=2, qtyIdx=3;
     if (isHeader) {
       firstCells.forEach((c,i)=>{
@@ -297,7 +293,7 @@ function PrintLabels() {
       });
     }
     const imported = dataLines.map(line=>{
-      const cells = line.split('	');
+      const cells = line.split('\t');
       return {
         id: Date.now()+Math.random(),
         po: (cells[poIdx]||"").trim(),
