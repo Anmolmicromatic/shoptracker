@@ -53,7 +53,15 @@ const db = {
     return sbFetch("app_settings", { method:"POST", body:JSON.stringify({ key, value:JSON.stringify(value) }) });
   },
   async deleteUpdate(id) { return sbFetch(`job_updates?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }); },
-  async deleteUpdatesByPO(po) { return sbFetch(`job_updates?production_number=eq.${encodeURIComponent(po)}`, { method:"DELETE", prefer:"return=minimal" }); },
+  async deleteUpdatesByPO(po) {
+    // Try by production_number first
+    await sbFetch(`job_updates?production_number=eq.${encodeURIComponent(po)}`, { method:"DELETE", prefer:"return=minimal" });
+    // Also try by station/status match won't work — so also update via job lookup
+    const jobs = await sbFetch(`jobs?production_number=eq.${encodeURIComponent(po)}&select=id`);
+    if (jobs && jobs.length > 0) {
+      await sbFetch(`job_updates?job_id=eq.${jobs[0].id}`, { method:"DELETE", prefer:"return=minimal" });
+    }
+  },
 };
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────
@@ -850,9 +858,21 @@ function JobStatus() {
   useEffect(()=>{ load(); },[]);
 
   async function deleteRow(po) {
-    if (!window.confirm(`Delete all records for PO: ${po}?`)) return;
+    if (!window.confirm(`Delete all records for PO: ${po}?\nThis cannot be undone.`)) return;
     try {
-      await db.deleteUpdatesByPO(po);
+      // Collect all IDs for this PO from local state
+      const ids = updates
+        .filter(u => u.production_number === po || latestByPO[po]?.job_id === u.job_id)
+        .map(u => u.id);
+      if (ids.length > 0) {
+        // Delete each by ID — most reliable
+        for (const id of ids) {
+          await db.deleteUpdate(id);
+        }
+      } else {
+        // Fallback: delete by production_number
+        await db.deleteUpdatesByPO(po);
+      }
       load();
     } catch(e) { alert("Delete failed: "+e.message); }
   }
