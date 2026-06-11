@@ -331,66 +331,7 @@ function PrintLabels() {
     setSaving(true);
     try { await saveToDb(); setSaved(true); } catch(e) { console.warn("DB:", e.message); }
     setSaving(false);
-
-    const data = JSON.stringify({
-      labels: expandedLabels.map(r=>({ po:r.po, material:r.material, qty:r.qty, desc:r.description||"" })),
-      startPos: startPos
-    });
-
-    const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Labels</title>' +
-      '<style>' +
-      '* { margin:0; padding:0; box-sizing:border-box; }' +
-      'body { background:#f0f0f0; font-family:Courier New,monospace; }' +
-      '.ctrl { padding:16px; background:#1a1a1a; color:#d4a853; display:flex; gap:12px; align-items:center; }' +
-      '.ctrl button { background:#d4a853; color:#000; border:none; padding:10px 20px; font-weight:bold; cursor:pointer; font-family:monospace; font-size:13px; border-radius:3px; }' +
-      '.sheet { width:210mm; background:white; margin:20px auto; box-shadow:0 2px 20px rgba(0,0,0,0.3); padding-top:16.479mm; padding-left:7.597mm; padding-bottom:10mm; }' +
-      '.grid { display:grid; grid-template-columns:64mm 64mm 64mm; grid-auto-rows:34mm; column-gap:2.472mm; row-gap:0mm; }' +
-      '.lbl { width:64mm; height:34mm; border:0.3mm solid #999; display:flex; align-items:center; padding:2mm 3mm 2mm 4mm; gap:1.5mm; overflow:hidden; }' +
-      '.lbl.empty { border:0.3mm dashed #eee; }' +
-      '.ltxt { flex:1; overflow:hidden; display:flex; flex-direction:column; justify-content:center; gap:0.8mm; min-width:0; }' +
-      '.lpo { font-size:8pt; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }' +
-      '.lline { font-size:7.5pt; font-weight:900; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }' +
-      '.lline span { color:#555; font-weight:700; }' +
-      '.ldesc { font-size:6.5pt; color:#333; font-weight:700; line-height:1.3; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; white-space:normal; word-break:break-word; }' +
-      '.lqr { width:20mm; height:20mm; flex-shrink:0; display:flex; align-items:center; justify-content:center; margin-right:3mm; }' +
-      '.lqr canvas, .lqr img { width:20mm !important; height:20mm !important; display:block; }' +
-      '@media print { @page { size:A4 portrait; margin:0mm; } body { background:white; } .ctrl { display:none !important; } .sheet { margin:0; box-shadow:none; } .lbl { border:0.3mm solid #aaa; } .lbl.empty { border:none; } }' +
-      '</style></head><body>' +
-      '<div class="ctrl">' +
-      '<strong>SHOPTRACK LABELS</strong>' +
-      '<button onclick="window.print()">PRINT</button>' +
-      '<span style="font-size:11px;color:#888;">Chrome: Margins=None / Scale=100% / A4</span>' +
-      '<button onclick="window.close()" style="background:#333;color:#aaa;margin-left:auto;">X CLOSE</button>' +
-      '</div>' +
-      '<div class="sheet"><div class="grid" id="g"></div></div>' +
-      '<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>' +
-      '<script>' +
-      'var D=' + data + ';' +
-      'var g=document.getElementById("g");' +
-      'var total=Math.ceil((D.labels.length+D.startPos-1)/24)*24;' +
-      'for(var i=0;i<total;i++){' +
-      '  var idx=i-(D.startPos-1);' +
-      '  var l=(idx>=0&&idx<D.labels.length)?D.labels[idx]:null;' +
-      '  var c=document.createElement("div");' +
-      '  c.className=l?"lbl":"lbl empty";' +
-      '  if(l){' +
-      '    var t=document.createElement("div");' +
-      '    t.className="ltxt";' +
-      '    t.innerHTML="<div class=\"lpo\">PO: "+l.po+"</div><div class=\"lline\"><span>MAT: </span>"+l.material+"</div><div class=\"lline\"><span>QTY: </span>"+l.qty+"</div><div class=\"ldesc\">"+l.desc+"</div>";' +
-      '    c.appendChild(t);' +
-      '    var q=document.createElement("div");' +
-      '    q.className="lqr";q.id="q"+i;' +
-      '    c.appendChild(q);' +
-      '    g.appendChild(c);' +
-      '    new QRCode(document.getElementById("q"+i),{text:l.po+"|"+l.material+"|"+l.qty+"|"+l.desc,width:76,height:76,correctLevel:QRCode.CorrectLevel.M});' +
-      '  } else { g.appendChild(c); }' +
-      '}' +
-      '<\/script></body></html>';
-
-    const w = window.open('', '_blank');
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
+    setShowPrint(true);
   }
 
 
@@ -536,58 +477,100 @@ function PrintLabels() {
 
 // ─── LABEL PRINT PAGE ─────────────────────────────────────────────────────
 function LabelPrintPage({ rows, startPos, onBack }) {
-  // Build 24-slot array: empty before startPos, then labels, empty after
-  // If labels overflow 24, continue onto next sheet
-  const allSlots = [];
-  const offset = startPos - 1; // 0-based
-  for (let i = 0; i < offset; i++) allSlots.push(null); // empty slots before start
-  rows.forEach(r => allSlots.push(r));
+  const total = Math.ceil((rows.length + startPos - 1) / 24) * 24;
+  const slots = [];
+  for (let i = 0; i < startPos - 1; i++) slots.push(null);
+  rows.forEach(r => slots.push(r));
+  while (slots.length < total) slots.push(null);
 
-  // Split into sheets of 24
   const sheets = [];
-  for (let i = 0; i < allSlots.length; i += 24) {
-    sheets.push(allSlots.slice(i, i+24));
+  for (let i = 0; i < slots.length; i += 24) {
+    const sheet = slots.slice(i, i + 24);
+    while (sheet.length < 24) sheet.push(null);
+    sheets.push(sheet);
   }
-  // Pad last sheet to 24
-  const last = sheets[sheets.length-1];
-  while (last && last.length < 24) last.push(null);
-
-  const totalLabels = rows.length;
 
   return (
     <div>
-      <div className="no-print" style={{ padding:16, display:"flex", gap:8, alignItems:"center", background:"#1a1a1a", borderBottom:"1px solid #2a2a2a", flexWrap:"wrap" }}>
+      <div className="no-print" style={{ padding:"12px 16px", background:"#1a1a1a", borderBottom:"1px solid #2a2a2a", display:"flex", gap:8, alignItems:"center" }}>
         <button style={S.btn("ghost")} onClick={onBack}>← BACK</button>
-        <button style={{ ...S.btn("primary"), padding:"10px 24px" }} onClick={()=>window.print()}>🖨  PRINT / SAVE PDF</button>
-        <div style={{ fontFamily:"monospace", fontSize:11, color:"#888", marginLeft:8 }}>
-          {totalLabels} labels · starting at position {startPos} · {sheets.length} sheet{sheets.length!==1?"s":""}
-        </div>
-      </div>
-      <div className="no-print" style={{ padding:"8px 16px", background:"#111", borderBottom:"1px solid #1a1a1a" }}>
-        <div style={{ fontFamily:"monospace", fontSize:10, color:"#555" }}>
-          ⚙ Oddy ST-24 A4100 · Paper = A4 Portrait · Margins = None (0mm all sides) · Scale = 100% · Background graphics ON · Word ref: L-7159
-        </div>
+        <button style={{ ...S.btn("primary"), padding:"10px 24px" }} onClick={()=>window.print()}>🖨 PRINT</button>
+        <span style={{ fontFamily:"monospace", fontSize:11, color:"#888", marginLeft:8 }}>
+          {rows.length} labels · {sheets.length} sheet{sheets.length!==1?"s":""} · Chrome: Margins=None · Scale=100%
+        </span>
       </div>
 
-      <div id="label-sheets">
-        {sheets.map((sheetSlots, si)=>(
-          <div key={si} className="label-sheet">
-            <div className="label-grid">
-              {Array.from({length:24}).map((_,li)=>{
-                const slot = sheetSlots[li];
-                if (!slot) return <div key={li} className="label-cell label-empty" />;
-                const qrData = encodeQR({ production_number:slot.po, material_number:slot.material, quantity:slot.qty, description:slot.description });
-                const qrUrl = generateQRDataURL(qrData);
-                const shortDesc = (slot.description||"").length>40 ? slot.description.slice(0,38)+"…" : (slot.description||"");
+      <style>{`
+        @media print {
+          @page { size: A4 portrait; margin: 0mm; }
+          body * { visibility: hidden; }
+          #print-area, #print-area * { visibility: visible; }
+          #print-area { position: fixed; top: 0; left: 0; width: 100%; }
+          .no-print { display: none !important; }
+          .sheet-break { page-break-after: always; }
+        }
+        .label-sheet-preview {
+          width: 210mm;
+          background: white;
+          margin: 16px auto;
+          box-shadow: 0 2px 20px rgba(0,0,0,0.4);
+          padding-top: 16.479mm;
+          padding-left: 7.597mm;
+          padding-bottom: 5mm;
+          box-sizing: border-box;
+        }
+        .label-grid-preview {
+          display: grid;
+          grid-template-columns: 64mm 64mm 64mm;
+          grid-auto-rows: 34mm;
+          column-gap: 2.472mm;
+          row-gap: 0mm;
+        }
+        .label-item {
+          width: 64mm;
+          height: 34mm;
+          border: 0.3mm solid #aaa;
+          display: flex;
+          align-items: center;
+          padding: 2mm 3mm 2mm 4mm;
+          gap: 1.5mm;
+          overflow: hidden;
+          box-sizing: border-box;
+        }
+        .label-item.empty { border: 0.3mm dashed #ddd; }
+        .label-txt {
+          flex: 1;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          gap: 0.7mm;
+          min-width: 0;
+        }
+        .l-po { font-family: Courier New, monospace; font-size: 8pt; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; }
+        .l-line { font-family: Courier New, monospace; font-size: 7pt; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; }
+        .l-desc { font-family: Courier New, monospace; font-size: 6pt; color: #333; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; word-break: break-word; }
+        .l-qr { width: 20mm; height: 20mm; flex-shrink: 0; margin-right: 3mm; }
+        .l-qr img { width: 20mm; height: 20mm; display: block; }
+      `}</style>
+
+      <div id="print-area">
+        {sheets.map((sheet, si) => (
+          <div key={si} className={"label-sheet-preview" + (si < sheets.length-1 ? " sheet-break" : "")}>
+            <div className="label-grid-preview">
+              {sheet.map((slot, li) => {
+                if (!slot) return <div key={li} className="label-item empty" />;
+                const qrText = encodeURIComponent(slot.po + "|" + slot.material + "|" + slot.qty + "|" + (slot.description||slot.desc||""));
+                const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=" + qrText;
                 return (
-                  <div key={li} className="label-cell">
-                    <img src={qrUrl} alt="QR" className="label-qr" />
-                    <div className="label-details">
-                      <div className="label-po">{slot.po}</div>
-                      <div className="label-row"><span className="label-key">MAT:</span><span className="label-val">{slot.material}</span></div>
-                      <div className="label-row"><span className="label-key">QTY:</span><span className="label-val">{slot.qty}</span></div>
-                      {shortDesc && <div className="label-desc">{shortDesc}</div>}
+                  <div key={li} className="label-item">
+                    <div className="label-txt">
+                      <div className="l-po">PO: {slot.po}</div>
+                      <div className="l-line">MAT: {slot.material}</div>
+                      <div className="l-line">QTY: {slot.qty}</div>
+                      <div className="l-desc">{slot.description||slot.desc||""}</div>
                     </div>
+                    <img className="l-qr" src={qrUrl} alt="QR" />
                   </div>
                 );
               })}
@@ -595,75 +578,6 @@ function LabelPrintPage({ rows, startPos, onBack }) {
           </div>
         ))}
       </div>
-
-      <style>{`
-        /* ── Oddy ST-24 A4100 exact specs ── */
-        /* Top margin: 12.979mm | Left margin: 4.597mm */
-        /* Label: 64×34mm | H-pitch: 66.472mm | V-pitch: 33.858mm */
-        /* Col gap: 2.472mm | Row gap: ~0mm (labels touch) */
-        .label-sheet {
-          background: white;
-          width: 210mm;
-          height: 297mm;
-          margin: 16px auto;
-          box-shadow: 0 2px 20px rgba(0,0,0,0.5);
-          box-sizing: border-box;
-          position: relative;
-          overflow: hidden;
-        }
-        .label-grid {
-          position: absolute;
-          top: 12.979mm;
-          left: 4.597mm;
-          display: grid;
-          grid-template-columns: repeat(3, 64mm);
-          grid-template-rows: repeat(8, 34mm);
-          column-gap: 2.472mm;
-          row-gap: 0mm;
-        }
-        .label-cell {
-          width: 64mm;
-          height: 34mm;
-          border: 0.2mm solid #ccc;
-          display: flex;
-          flex-direction: row;
-          align-items: center;
-          padding: 1.5mm 2mm;
-          box-sizing: border-box;
-          overflow: hidden;
-          gap: 1.5mm;
-        }
-        .label-empty { border: 0.2mm dashed #eee; }
-        .label-qr { width: 28mm; height: 28mm; flex-shrink: 0; object-fit: contain; }
-        .label-details { flex:1; overflow:hidden; display:flex; flex-direction:column; gap:0.7mm; }
-        .label-po { font-family:'Courier New',monospace; font-size:7.5pt; font-weight:900; color:#000; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .label-row { font-family:'Courier New',monospace; font-size:6.5pt; color:#000; line-height:1.2; display:flex; gap:1mm; }
-        .label-key { color:#555; flex-shrink:0; font-weight:700; }
-        .label-val { font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .label-desc { font-family:'Courier New',monospace; font-size:5pt; color:#444; line-height:1.2; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-        @media print {
-          body * { visibility: hidden; }
-          #label-sheets, #label-sheets * { visibility: visible; }
-          #label-sheets { position: fixed; top: 0; left: 0; width: 100%; }
-          .no-print { display: none !important; }
-          .label-sheet {
-            width: 210mm;
-            height: 297mm;
-            margin: 0;
-            box-shadow: none;
-            page-break-after: always;
-          }
-          .label-grid {
-            top: 12.979mm;
-            left: 4.597mm;
-            column-gap: 2.472mm;
-            row-gap: 0mm;
-          }
-          .label-cell { border: 0.2mm solid #bbb; }
-          .label-empty { border: none; }
-          @page { size: A4 portrait; margin: 0mm; }
-        }
-      `}</style>
     </div>
   );
 }
