@@ -347,7 +347,7 @@ function PrintLabels() {
   .controls { padding:16px; background:#1a1a1a; color:#d4a853; display:flex; gap:12px; align-items:center; }
   .controls button { background:#d4a853; color:#000; border:none; padding:10px 20px; font-weight:bold; cursor:pointer; font-family:monospace; font-size:13px; border-radius:3px; }
   .sheet { width:210mm; height:297mm; background:white; margin:20px auto; position:relative; box-shadow:0 2px 20px rgba(0,0,0,0.3); overflow:hidden; }
-  .label-grid { position:absolute; top:16.479mm; left:7.597mm; display:grid; grid-template-columns:64mm 64mm 64mm; grid-template-rows:repeat(8,34mm); column-gap:2.472mm; row-gap:0mm; }
+  .label-grid { position:absolute; top:16.479mm; left:7.597mm; display:grid; grid-template-columns:64mm 64mm 64mm; grid-auto-rows:34mm; column-gap:2.472mm; row-gap:0mm; }
   .label { width:64mm; height:34mm; border:0.3mm solid #999; display:flex; flex-direction:row; align-items:center; padding:2mm 3mm 2mm 4mm; gap:1.5mm; overflow:hidden; }
   .label.empty { border:0.3mm dashed #ddd; }
   .label-text { flex:1; overflow:hidden; display:flex; flex-direction:column; justify-content:center; gap:0.8mm; min-width:0; }
@@ -381,8 +381,9 @@ function PrintLabels() {
 <script>
 const LABELS = ${labelsJson};
 const START_POS = ${startPos};
+const TOTAL_SLOTS = Math.ceil((LABELS.length + START_POS - 1) / 24) * 24;
 const grid = document.getElementById('labelGrid');
-for (let i = 0; i < 24; i++) {
+for (let i = 0; i < TOTAL_SLOTS; i++) {
   const idx = i - (START_POS - 1);
   const lbl = (idx >= 0 && idx < LABELS.length) ? LABELS[idx] : null;
   const cell = document.createElement('div');
