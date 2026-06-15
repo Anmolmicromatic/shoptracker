@@ -42,7 +42,8 @@ const db = {
     return sbFetch("app_settings", { method:"POST", body:JSON.stringify({ key, value:JSON.stringify(value) }) });
   },
   deleteUpdate: (id) => sbFetch(`job_updates?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
-  getLibrary: () => sbFetch("jobs?select=production_number,material_number,quantity&order=created_at.desc&limit=1000"),
+  getLibrary: () => sbFetch("jobs?select=production_number,material_number,quantity,description&order=created_at.desc&limit=1000"),
+  deleteJob: (id) => sbFetch(`jobs?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
   deleteUpdatesByPO: async (po) => {
     await sbFetch(`job_updates?production_number=eq.${encodeURIComponent(po)}`, { method:"DELETE", prefer:"return=minimal" });
     const jobs = await sbFetch(`jobs?production_number=eq.${encodeURIComponent(po)}&select=id`);
@@ -502,83 +503,120 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
 // ─── LOG UPDATE ────────────────────────────────────────────────────────────
 function LogUpdate({ stations, supervisors, onSaved }) {
   const [scanMode, setScanMode] = useState(null);
-  const [po, setPo] = useState("");
+
+  // Job fields
+  const [poInput, setPoInput] = useState("");
   const [material, setMaterial] = useState("");
   const [qty, setQty] = useState("");
+  const [poError, setPoError] = useState("");
+  const [autoFilled, setAutoFilled] = useState(false);
+  const [manualEntry, setManualEntry] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+
+  // Machine
   const [station, setStation] = useState("");
   const [stationInput, setStationInput] = useState("");
   const [stationMode, setStationMode] = useState("dropdown");
+
+  // Status & supervisor
   const [status, setStatus] = useState("");
   const [supervisor, setSupervisor] = useState("");
+
+  // Save
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
-  const [step, setStep] = useState(1);
-  const [library, setLibrary] = useState({});
-  const [autoFilled, setAutoFilled] = useState(false);
 
-  // Load label library on mount
+  // Library
+  const [library, setLibrary] = useState([]);
+
   useEffect(() => {
     db.getLibrary().then(rows => {
-      if (!rows) return;
-      const lib = {};
-      rows.forEach(r => { lib[r.production_number] = { material: r.material_number, qty: r.quantity }; });
-      setLibrary(lib);
-    }).catch(() => {});
+      if (rows) setLibrary(rows);
+    }).catch(()=>{});
   }, []);
 
-  // Auto-fill when PO changes
-  function handlePoChange(val) {
-    setPo(val);
-    const found = library[val.trim()];
-    if (found) {
-      setMaterial(found.material || "");
-      setQty(found.qty || "");
-      setAutoFilled(true);
+  const effectiveStation = stationMode==="manual" ? stationInput.trim() : station;
+
+  // Partial PO search — match last digits
+  function searchLibrary(input) {
+    const val = input.trim();
+    if (!val) { setSuggestions([]); setPoError(""); setAutoFilled(false); setManualEntry(false); return; }
+    const matches = library.filter(r =>
+      r.production_number === val ||
+      r.production_number?.endsWith(val) ||
+      r.production_number?.includes(val)
+    );
+    if (matches.length === 1) {
+      // Exact single match — auto fill
+      fillFromLibrary(matches[0]);
+      setSuggestions([]);
+    } else if (matches.length > 1) {
+      // Multiple matches — show dropdown
+      setSuggestions(matches);
+      setAutoFilled(false);
+      setManualEntry(false);
+      setPoError("");
     } else {
+      // No match
+      setSuggestions([]);
       setAutoFilled(false);
     }
   }
 
-  const effectiveStation = stationMode==="manual" ? stationInput.trim() : station;
-  const jobReady = po.trim() && material.trim() && qty.trim();
+  function fillFromLibrary(row) {
+    setPoInput(row.production_number);
+    setMaterial(row.material_number || "");
+    setQty(row.quantity || "");
+    setAutoFilled(true);
+    setManualEntry(false);
+    setPoError("");
+    setSuggestions([]);
+  }
 
-  function handleQRScan(code) {
-    setScanMode(null);
-    if (scanMode==="job") {
-      const d = decodeQR(code);
-      const poVal = d.production_number || "";
-      setPo(poVal);
-      // Try library first, fall back to QR data
-      const found = library[poVal.trim()];
-      if (found) {
-        setMaterial(found.material || d.material_number || "");
-        setQty(found.qty || d.quantity || "");
-        setAutoFilled(true);
-      } else {
-        setMaterial(d.material_number || "");
-        setQty(d.quantity || "");
-        setAutoFilled(false);
-      }
-      if (poVal) setStep(2);
-    }
-    if (scanMode==="machine") {
-      const found = stations.find(s => s.toUpperCase()===code.trim().toUpperCase());
-      if (found) { setStation(found); setStationMode("dropdown"); }
-      else { setStationInput(code.trim()); setStationMode("manual"); }
-      setStep(3);
+  function handlePoBlur() {
+    if (suggestions.length === 0 && !autoFilled && poInput.trim()) {
+      // Not found in library
+      setPoError("PO not found in library — enter Material No. and Qty manually");
+      setManualEntry(true);
     }
   }
 
+  function handleQRScan(code) {
+    setScanMode(null);
+    if (scanMode === "job") {
+      const d = decodeQR(code);
+      const po = d.production_number || "";
+      setPoInput(po);
+      // Try library first
+      const found = library.find(r => r.production_number === po);
+      if (found) {
+        fillFromLibrary(found);
+      } else {
+        setMaterial(d.material_number || "");
+        setQty(d.quantity || "");
+        if (d.material_number) { setAutoFilled(true); setManualEntry(false); }
+        else { setManualEntry(true); setPoError("PO not in library — verify details below"); }
+      }
+    }
+    if (scanMode === "machine") {
+      const found = stations.find(s => s.toUpperCase() === code.trim().toUpperCase());
+      if (found) { setStation(found); setStationMode("dropdown"); }
+      else { setStationInput(code.trim()); setStationMode("manual"); }
+    }
+  }
+
+  const canSave = poInput.trim() && material.trim() && qty.trim() && effectiveStation && status && supervisor;
+
   async function save() {
-    if (!po.trim()||!effectiveStation||!supervisor||!status) return;
+    if (!canSave) return;
     setSaving(true);
     try {
       await db.addUpdate({
         job_id: null,
-        production_number: po.trim(),
+        production_number: poInput.trim(),
         material_number: material.trim(),
         quantity: qty.trim(),
-        supervisor, station:effectiveStation, status,
+        supervisor, station: effectiveStation, status,
         is_deviation: false,
         unknown_machine: !stations.includes(effectiveStation),
         created_at: new Date().toISOString()
@@ -591,9 +629,11 @@ function LogUpdate({ stations, supervisors, onSaved }) {
   }
 
   function reset() {
-    setPo(""); setMaterial(""); setQty("");
+    setPoInput(""); setMaterial(""); setQty("");
     setStation(""); setStationInput(""); setStationMode("dropdown");
-    setStatus(""); setSupervisor(""); setStep(1); setDone(false); setAutoFilled(false);
+    setStatus(""); setSupervisor("");
+    setPoError(""); setAutoFilled(false); setManualEntry(false); setSuggestions([]);
+    setDone(false); setSaving(false);
   }
 
   if (done) return (
@@ -608,100 +648,173 @@ function LogUpdate({ stations, supervisors, onSaved }) {
   return (
     <div style={{ padding:16, maxWidth:520, margin:"0 auto" }}>
       {scanMode && <QRScanner onResult={handleQRScan} onClose={()=>setScanMode(null)} />}
-      {step>1 && <button style={{ ...S.btn("ghost"), fontSize:11, marginBottom:12 }} onClick={()=>setStep(step-1)}>BACK</button>}
 
-      {step===1 && (
-        <div style={S.card}>
-          <div style={S.sectionTitle}>STEP 1 — JOB CARD</div>
-          <button style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:14, marginBottom:16 }} onClick={()=>setScanMode("job")}>
-            SCAN JOB LABEL QR
-          </button>
-          <div style={{ textAlign:"center", color:"#444", fontSize:10, marginBottom:14 }}>— or enter manually —</div>
-          <div style={{ marginBottom:10 }}>
-            <label style={S.label}>Production Order No. *</label>
-            <input style={S.input} value={po} onChange={e=>handlePoChange(e.target.value)} placeholder="e.g. 100031646" />
-          </div>
-          {autoFilled && (
-            <div style={{ background:"#14532d33", border:"1px solid #22c55e", borderRadius:4, padding:"6px 12px", marginBottom:10, fontFamily:"monospace", fontSize:11, color:"#22c55e" }}>
-              Auto-filled from label library
-            </div>
-          )}
-          <div style={{ marginBottom:10 }}>
-            <label style={S.label}>Material No. *</label>
-            <input style={{ ...S.input, borderColor: autoFilled ? "#22c55e44" : "#333" }} value={material} onChange={e=>setMaterial(e.target.value)} placeholder="e.g. M161501" />
-          </div>
-          <div style={{ marginBottom:16 }}>
-            <label style={S.label}>Quantity *</label>
-            <input style={{ ...S.input, borderColor: autoFilled ? "#22c55e44" : "#333" }} value={qty} onChange={e=>setQty(e.target.value)} placeholder="e.g. 10 Nos" />
-          </div>
-          <button style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13 }} onClick={()=>{ if(jobReady) setStep(2); }} disabled={!jobReady}>
-            NEXT — SELECT MACHINE
-          </button>
-        </div>
-      )}
+      {/* ── SCAN BUTTON ── */}
+      <button
+        style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:14, marginBottom:16, letterSpacing:"0.1em" }}
+        onClick={()=>setScanMode("job")}
+      >
+        ▣  SCAN JOB LABEL QR
+      </button>
 
-      {step===2 && (
-        <div>
-          <div style={{ ...S.card, marginBottom:12, borderColor:"#d4a85344" }}>
-            <div style={{ fontFamily:"monospace", fontSize:13, fontWeight:700, color:"#d4a853" }}>{po}</div>
-            <div style={{ fontFamily:"monospace", fontSize:11, color:"#aaa", marginTop:2 }}>MAT: {material} · QTY: {qty}</div>
-          </div>
-          <div style={S.card}>
-            <div style={S.sectionTitle}>STEP 2 — MACHINE</div>
-            <button style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13, marginBottom:14 }} onClick={()=>setScanMode("machine")}>
-              SCAN MACHINE QR
-            </button>
-            <div style={{ textAlign:"center", color:"#444", fontSize:10, marginBottom:12 }}>— or select / type —</div>
-            <div style={{ display:"flex", gap:6, marginBottom:10 }}>
-              <button style={{ ...S.tab(stationMode==="dropdown"), flex:1, padding:"7px" }} onClick={()=>setStationMode("dropdown")}>FROM LIST</button>
-              <button style={{ ...S.tab(stationMode==="manual"), flex:1, padding:"7px" }} onClick={()=>setStationMode("manual")}>TYPE</button>
-            </div>
-            {stationMode==="dropdown"
-              ? <select style={{ ...S.select, marginBottom:12 }} value={station} onChange={e=>setStation(e.target.value)}><option value="">-- Select Machine --</option>{stations.map(s=><option key={s}>{s}</option>)}</select>
-              : <input style={{ ...S.input, marginBottom:12 }} value={stationInput} onChange={e=>setStationInput(e.target.value)} placeholder="Type machine name" />
-            }
-            {effectiveStation && !stations.includes(effectiveStation) && (
-              <div style={{ ...S.warn, marginBottom:12 }}>Machine not in master list — saved as entered.</div>
-            )}
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>{ if(effectiveStation) setStep(3); }} disabled={!effectiveStation}>
-              NEXT — STATUS & SUPERVISOR
-            </button>
-          </div>
-        </div>
-      )}
+      <div style={{ textAlign:"center", color:"#444", fontSize:10, marginBottom:14, fontFamily:"monospace" }}>— or enter PO number (full or last 4 digits) —</div>
 
-      {step===3 && (
-        <div>
-          <div style={{ ...S.card, marginBottom:12, borderColor:"#d4a85344" }}>
-            <div style={{ fontFamily:"monospace", fontSize:12, fontWeight:700, color:"#d4a853" }}>{po} · {effectiveStation}</div>
-            <div style={{ fontFamily:"monospace", fontSize:11, color:"#aaa", marginTop:2 }}>MAT: {material} · QTY: {qty}</div>
-          </div>
-          <div style={S.card}>
-            <div style={S.sectionTitle}>STEP 3 — STATUS & SUPERVISOR</div>
-            <label style={S.label}>Status</label>
-            <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:18 }}>
-              {STATUSES.map(s => (
-                <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, minWidth:70, padding:"10px 6px", borderRadius:4, fontSize:11, fontFamily:"monospace", fontWeight:700, cursor:"pointer", textTransform:"uppercase", border:`1px solid ${status===s?STATUS_COLORS[s]:"#333"}`, background:status===s?STATUS_COLORS[s]:"#111", color:status===s?"#0f0f0f":"#888" }}>
-                  {s}
-                </button>
+      {/* ── PO INPUT ── */}
+      <div style={{ ...S.card, marginBottom:12 }}>
+
+        {/* PO Number */}
+        <div style={{ marginBottom:10, position:"relative" }}>
+          <label style={S.label}>Production Order No.</label>
+          <input
+            style={{ ...S.input, borderColor: poError ? "#ef4444" : autoFilled ? "#22c55e44" : "#333" }}
+            value={poInput}
+            onChange={e => { setPoInput(e.target.value); searchLibrary(e.target.value); }}
+            onBlur={handlePoBlur}
+            placeholder="Full PO or last 4 digits e.g. 2338"
+            autoComplete="off"
+          />
+          {/* Suggestions — shown as cards below input */}
+          {suggestions.length > 0 && (
+            <div style={{ marginTop:8, display:"flex", flexDirection:"column", gap:6 }}>
+              <div style={{ fontFamily:"monospace", fontSize:10, color:"#888" }}>
+                {suggestions.length} match{suggestions.length!==1?"es":""} found — tap to select:
+              </div>
+              {suggestions.map(s => (
+                <div
+                  key={s.production_number}
+                  onClick={() => fillFromLibrary(s)}
+                  style={{ background:"#111", border:"1px solid #d4a85366", borderRadius:6, padding:"10px 14px", cursor:"pointer", transition:"border .15s" }}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor="#d4a853"}
+                  onMouseLeave={e=>e.currentTarget.style.borderColor="#d4a85366"}
+                >
+                  <div style={{ fontFamily:"monospace", fontSize:13, fontWeight:700, color:"#d4a853", marginBottom:4 }}>
+                    PO: {s.production_number}
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4 }}>
+                    <div>
+                      <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase", letterSpacing:"0.1em" }}>Material No.</div>
+                      <div style={{ fontFamily:"monospace", fontSize:12, fontWeight:700, color:"#e8e2d4" }}>{s.material_number}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase", letterSpacing:"0.1em" }}>Quantity</div>
+                      <div style={{ fontFamily:"monospace", fontSize:12, fontWeight:700, color:"#e8e2d4" }}>{s.quantity}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", marginTop:4, textAlign:"right" }}>Tap to select →</div>
+                </div>
               ))}
             </div>
-            <label style={S.label}>Supervisor</label>
-            <select style={{ ...S.select, marginBottom:20 }} value={supervisor} onChange={e=>setSupervisor(e.target.value)}>
-              <option value="">-- Select Supervisor --</option>
-              {supervisors.map(s=><option key={s}>{s}</option>)}
-            </select>
-            <button style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:14 }} onClick={save} disabled={saving||!status||!supervisor}>
-              {saving ? "SAVING..." : !status ? "SELECT STATUS FIRST" : !supervisor ? "SELECT SUPERVISOR FIRST" : "OK — SAVE"}
-            </button>
+          )}
+        </div>
+
+        {/* Auto-filled indicator */}
+        {autoFilled && (
+          <div style={{ background:"#14532d33", border:"1px solid #22c55e44", borderRadius:4, padding:"5px 10px", marginBottom:10, fontFamily:"monospace", fontSize:10, color:"#22c55e" }}>
+            ✓ Auto-filled from label library
+          </div>
+        )}
+
+        {/* PO Error */}
+        {poError && (
+          <div style={{ background:"#7f1d1d33", border:"1px solid #ef444444", borderRadius:4, padding:"5px 10px", marginBottom:10, fontFamily:"monospace", fontSize:10, color:"#ef4444" }}>
+            ⚠ {poError}
+          </div>
+        )}
+
+        {/* Material & Qty — show always but editable */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          <div>
+            <label style={S.label}>Material No. *</label>
+            <input
+              style={{ ...S.input, borderColor: autoFilled ? "#22c55e44" : "#333" }}
+              value={material}
+              onChange={e=>setMaterial(e.target.value)}
+              placeholder="M161501"
+              readOnly={autoFilled && !manualEntry}
+            />
+          </div>
+          <div>
+            <label style={S.label}>Quantity *</label>
+            <input
+              style={{ ...S.input, borderColor: autoFilled ? "#22c55e44" : "#333" }}
+              value={qty}
+              onChange={e=>setQty(e.target.value)}
+              placeholder="10 Nos"
+              readOnly={autoFilled && !manualEntry}
+            />
           </div>
         </div>
-      )}
+        {autoFilled && (
+          <button
+            style={{ ...S.btn("ghost"), fontSize:9, padding:"3px 8px", marginTop:6 }}
+            onClick={()=>{ setManualEntry(true); setAutoFilled(false); }}
+          >
+            EDIT DETAILS
+          </button>
+        )}
+      </div>
+
+      {/* ── MACHINE ── */}
+      <div style={{ ...S.card, marginBottom:12 }}>
+        <label style={S.label}>Machine / Work Center *</label>
+        <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+          <button style={{ ...S.tab(stationMode==="dropdown"), flex:1, padding:"6px" }} onClick={()=>setStationMode("dropdown")}>LIST</button>
+          <button style={{ ...S.tab(stationMode==="manual"), flex:1, padding:"6px" }} onClick={()=>setStationMode("manual")}>TYPE</button>
+          <button style={{ ...S.btn("ghost"), fontSize:10, padding:"6px 10px" }} onClick={()=>setScanMode("machine")}>▣ SCAN</button>
+        </div>
+        {stationMode==="dropdown"
+          ? <select style={S.select} value={station} onChange={e=>setStation(e.target.value)}>
+              <option value="">-- Select Machine --</option>
+              {stations.map(s=><option key={s}>{s}</option>)}
+            </select>
+          : <input style={S.input} value={stationInput} onChange={e=>setStationInput(e.target.value)} placeholder="Type machine name e.g. HM-51" />
+        }
+        {effectiveStation && !stations.includes(effectiveStation) && (
+          <div style={{ fontFamily:"monospace", fontSize:10, color:"#6366f1", marginTop:6 }}>* Not in master list — saved as entered</div>
+        )}
+      </div>
+
+      {/* ── STATUS ── */}
+      <div style={{ ...S.card, marginBottom:12 }}>
+        <label style={S.label}>Status *</label>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          {STATUSES.map(s => (
+            <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, minWidth:70, padding:"10px 6px", borderRadius:4, fontSize:11, fontFamily:"monospace", fontWeight:700, cursor:"pointer", textTransform:"uppercase", border:`1px solid ${status===s?STATUS_COLORS[s]:"#333"}`, background:status===s?STATUS_COLORS[s]:"#111", color:status===s?"#0f0f0f":"#888" }}>
+              {s}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── SUPERVISOR ── */}
+      <div style={{ ...S.card, marginBottom:16 }}>
+        <label style={S.label}>Supervisor *</label>
+        <select style={S.select} value={supervisor} onChange={e=>setSupervisor(e.target.value)}>
+          <option value="">-- Select Supervisor --</option>
+          {supervisors.map(s=><option key={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {/* ── SAVE ── */}
+      <button
+        style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:14, letterSpacing:"0.15em", opacity: canSave ? 1 : 0.5 }}
+        onClick={save}
+        disabled={saving || !canSave}
+      >
+        {saving ? "SAVING..." :
+         !poInput.trim() ? "SCAN OR ENTER PO FIRST" :
+         !material.trim() ? "ENTER MATERIAL NO." :
+         !qty.trim() ? "ENTER QUANTITY" :
+         !effectiveStation ? "SELECT MACHINE" :
+         !status ? "SELECT STATUS" :
+         !supervisor ? "SELECT SUPERVISOR" :
+         "✓  OK — SAVE UPDATE"}
+      </button>
     </div>
   );
 }
 
-// ─── JOB STATUS ────────────────────────────────────────────────────────────
+// ─── JOB STATUS ────────────────────────────────────────────────────────────// ─── JOB STATUS ────────────────────────────────────────────────────────────
 function JobStatus() {
   const [updates, setUpdates] = useState([]);
   const [jobs, setJobs] = useState([]);
@@ -1015,6 +1128,150 @@ function BulkImport() {
   );
 }
 
+// ─── LABEL LIBRARY ────────────────────────────────────────────────────────
+function LabelLibrary() {
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [reprintJob, setReprintJob] = useState(null);
+
+  async function load() {
+    setLoading(true);
+    try { const j = await db.getJobs(); setJobs(j||[]); }
+    catch(e) { console.error(e); }
+    setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function deleteJob(job) {
+    if (!window.confirm(`Delete label for PO: ${job.production_number}?`)) return;
+    try { await db.deleteJob(job.id); load(); }
+    catch(e) { alert("Delete failed: "+e.message); }
+  }
+
+  function fmtDate(d) {
+    if (!d) return "-";
+    return new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+  }
+
+  const filtered = jobs.filter(j => {
+    if (!search) return true;
+    const s = search.toLowerCase();
+    return j.production_number?.toLowerCase().includes(s) ||
+           j.material_number?.toLowerCase().includes(s) ||
+           j.description?.toLowerCase().includes(s);
+  });
+
+  // Reprint single label
+  if (reprintJob) {
+    const qrData = makeQRData(reprintJob.production_number, reprintJob.material_number, reprintJob.quantity);
+    return (
+      <div style={{ padding:16 }}>
+        <div style={{ ...S.card, marginBottom:14 }}>
+          <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:14 }}>
+            <button style={S.btn("ghost")} onClick={()=>setReprintJob(null)}>BACK</button>
+            <button style={{ ...S.btn("primary"), padding:"10px 24px" }} onClick={()=>window.print()}>PRINT</button>
+            <span style={{ fontFamily:"monospace", fontSize:11, color:"#888" }}>Margins=None · Scale=100% · Headers & Footers=OFF</span>
+          </div>
+          <div style={{ fontFamily:"monospace", fontSize:11, color:"#555" }}>
+            Reprinting: {reprintJob.production_number} · {reprintJob.material_number} · {reprintJob.quantity}
+          </div>
+        </div>
+
+        <div id="reprint-area">
+          <div style={{ width:"64mm", border:"0.3mm solid #aaa", display:"flex", alignItems:"center", padding:"1.5mm 2mm 1.5mm 1.5mm", gap:"1.5mm", background:"white", boxSizing:"border-box", height:"34mm", overflow:"hidden" }}>
+            <img src={qrImageUrl(qrData)} alt="QR" style={{ width:"24mm", height:"24mm", flexShrink:0, marginLeft:"1mm" }} />
+            <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column", justifyContent:"center", gap:"1.5mm" }}>
+              <div style={{ fontFamily:"Courier New,monospace", fontSize:"10pt", fontWeight:900, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>PO: {reprintJob.production_number}</div>
+              <div style={{ fontFamily:"Courier New,monospace", fontSize:"8pt", fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>MAT: {reprintJob.material_number}</div>
+              <div style={{ fontFamily:"Courier New,monospace", fontSize:"8pt", fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>QTY: {reprintJob.quantity}</div>
+            </div>
+          </div>
+        </div>
+
+        <style>{`
+          @media print {
+            @page { size: 64mm 34mm; margin: 0; }
+            body * { visibility: hidden; }
+            #reprint-area, #reprint-area * { visibility: visible; }
+            #reprint-area { position: fixed; top: 0; left: 0; }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding:16 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <div style={S.sectionTitle}>LABEL LIBRARY — {jobs.length} labels printed</div>
+        <button style={{ ...S.btn("ghost"), fontSize:10, padding:"6px 12px" }} onClick={load}>REFRESH</button>
+      </div>
+
+      <input
+        style={{ ...S.input, marginBottom:14 }}
+        value={search}
+        onChange={e=>setSearch(e.target.value)}
+        placeholder="Search by PO, Material No, Description..."
+      />
+
+      {loading && <div style={{ textAlign:"center", color:"#555", fontFamily:"monospace", padding:32 }}>LOADING...</div>}
+
+      {!loading && (
+        <div style={{ overflowX:"auto", border:"1px solid #2a2a2a", borderRadius:6 }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"monospace", fontSize:11, minWidth:600 }}>
+            <thead>
+              <tr style={{ background:"#111" }}>
+                {["PO No","Material No","Description","Qty","Printed Date",""].map(h=>(
+                  <th key={h} style={{ padding:"9px 12px", textAlign:"left", color:"#555", fontWeight:700, borderBottom:"1px solid #2a2a2a", fontSize:10, whiteSpace:"nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length===0 && (
+                <tr><td colSpan={6} style={{ padding:32, textAlign:"center", color:"#444" }}>
+                  {search ? "No labels found for: " + search : "No labels printed yet"}
+                </td></tr>
+              )}
+              {filtered.map((j,i)=>(
+                <tr key={j.id} style={{ borderBottom:"1px solid #1a1a1a", background:i%2===0?"transparent":"#0d0d0d" }}>
+                  <td style={{ padding:"8px 12px", color:"#d4a853", fontWeight:700 }}>{j.production_number}</td>
+                  <td style={{ padding:"8px 12px", color:"#e8e2d4" }}>{j.material_number}</td>
+                  <td style={{ padding:"8px 12px", color:"#aaa", maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{j.description||"—"}</td>
+                  <td style={{ padding:"8px 12px", color:"#888" }}>{j.quantity}</td>
+                  <td style={{ padding:"8px 12px", color:"#555", whiteSpace:"nowrap" }}>{fmtDate(j.printed_date||j.created_at)}</td>
+                  <td style={{ padding:"4px 8px" }}>
+                    <div style={{ display:"flex", gap:6 }}>
+                      <button
+                        onClick={()=>setReprintJob(j)}
+                        style={{ background:"none", border:"1px solid #d4a853", color:"#d4a853", borderRadius:3, padding:"2px 8px", cursor:"pointer", fontFamily:"monospace", fontSize:10 }}
+                      >
+                        REPRINT
+                      </button>
+                      <button
+                        onClick={()=>deleteJob(j)}
+                        style={{ background:"none", border:"1px solid #333", color:"#ef4444", borderRadius:3, padding:"2px 8px", cursor:"pointer", fontFamily:"monospace", fontSize:10 }}
+                      >
+                        DEL
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!loading && filtered.length > 0 && (
+        <div style={{ fontFamily:"monospace", fontSize:10, color:"#333", marginTop:8 }}>
+          Showing {filtered.length} of {jobs.length} labels · Click REPRINT to reprint a single label
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ROOT APP ──────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("log");
@@ -1035,11 +1292,12 @@ export default function App() {
   }, []);
 
   const TABS = [
-    { id:"log",    label:"LOG UPDATE" },
-    { id:"labels", label:"PRINT LABELS" },
-    { id:"status", label:"JOB STATUS" },
-    { id:"import", label:"IMPORT" },
-    { id:"setup",  label:"SETUP" },
+    { id:"log",     label:"LOG UPDATE" },
+    { id:"labels",  label:"PRINT LABELS" },
+    { id:"library", label:"LABEL LIBRARY" },
+    { id:"status",  label:"JOB STATUS" },
+    { id:"import",  label:"IMPORT" },
+    { id:"setup",   label:"SETUP" },
   ];
 
   return (
@@ -1054,6 +1312,7 @@ export default function App() {
       {page==="log"    && <LogUpdate stations={stations} supervisors={supervisors} onSaved={()=>setPage("status")} />}
       {page==="labels" && <PrintLabels />}
       {page==="status" && <JobStatus />}
+      {page==="library" && <LabelLibrary />}
       {page==="import" && <BulkImport />}
       {page==="setup"  && <SetupPage stations={stations} supervisors={supervisors} onUpdate={(wc,sup)=>{ setStations(wc); setSupervisors(sup); }} />}
     </div>
