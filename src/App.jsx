@@ -42,6 +42,7 @@ const db = {
     return sbFetch("app_settings", { method:"POST", body:JSON.stringify({ key, value:JSON.stringify(value) }) });
   },
   deleteUpdate: (id) => sbFetch(`job_updates?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
+  getLibrary: () => sbFetch("jobs?select=production_number,material_number,quantity&order=created_at.desc&limit=1000"),
   deleteUpdatesByPO: async (po) => {
     await sbFetch(`job_updates?production_number=eq.${encodeURIComponent(po)}`, { method:"DELETE", prefer:"return=minimal" });
     const jobs = await sbFetch(`jobs?production_number=eq.${encodeURIComponent(po)}&select=id`);
@@ -414,18 +415,17 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
                 const qrData = makeQRData(slot.po, slot.material, slot.qty);
                 return (
                   <div key={li} className="label-cell">
-                    <div className="label-txt">
-                      <div className="l-po">PO: {slot.po}</div>
-                      <div className="l-line">MAT: {slot.material}</div>
-                      <div className="l-line">QTY: {slot.qty}</div>
-                      <div className="l-desc">{(slot.description||slot.desc||"").slice(0,45)}</div>
-                    </div>
                     <img
                       className="l-qr"
                       src={qrImageUrl(qrData)}
                       alt="QR"
                       onError={e=>{ e.target.style.display="none"; }}
                     />
+                    <div className="label-txt">
+                      <div className="l-po">PO: {slot.po}</div>
+                      <div className="l-line">MAT: {slot.material}</div>
+                      <div className="l-line">QTY: {slot.qty}</div>
+                    </div>
                   </div>
                 );
               })}
@@ -464,8 +464,8 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
           border: 0.3mm solid #aaa;
           display: flex;
           align-items: center;
-          padding: 2mm 2mm 2mm 3mm;
-          gap: 1mm;
+          padding: 1.5mm 2mm 1.5mm 1.5mm;
+          gap: 1.5mm;
           overflow: hidden;
           box-sizing: border-box;
         }
@@ -475,19 +475,25 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
           border: 0.2mm dashed #ddd;
           box-sizing: border-box;
         }
+        .l-qr {
+          width: 24mm;
+          height: 24mm;
+          flex-shrink: 0;
+          display: block;
+          margin-left: 1mm;
+        }
         .label-txt {
           flex: 1;
           overflow: hidden;
           display: flex;
           flex-direction: column;
           justify-content: center;
-          gap: 0.6mm;
+          gap: 1.5mm;
           min-width: 0;
+          padding-right: 1mm;
         }
-        .l-po   { font-family: Courier New, monospace; font-size: 8pt;   font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; }
-        .l-line { font-family: Courier New, monospace; font-size: 7.5pt; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; }
-        .l-desc { font-family: Courier New, monospace; font-size: 6pt;   font-weight: 600; color: #333; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; word-break: break-word; }
-        .l-qr   { width: 20mm; height: 20mm; flex-shrink: 0; margin-right: 2mm; display: block; }
+        .l-po   { font-family: Courier New, monospace; font-size: 10pt; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.1; }
+        .l-line { font-family: Courier New, monospace; font-size: 8pt;  font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.2; }
       `}</style>
     </div>
   );
@@ -507,6 +513,31 @@ function LogUpdate({ stations, supervisors, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [step, setStep] = useState(1);
+  const [library, setLibrary] = useState({});
+  const [autoFilled, setAutoFilled] = useState(false);
+
+  // Load label library on mount
+  useEffect(() => {
+    db.getLibrary().then(rows => {
+      if (!rows) return;
+      const lib = {};
+      rows.forEach(r => { lib[r.production_number] = { material: r.material_number, qty: r.quantity }; });
+      setLibrary(lib);
+    }).catch(() => {});
+  }, []);
+
+  // Auto-fill when PO changes
+  function handlePoChange(val) {
+    setPo(val);
+    const found = library[val.trim()];
+    if (found) {
+      setMaterial(found.material || "");
+      setQty(found.qty || "");
+      setAutoFilled(true);
+    } else {
+      setAutoFilled(false);
+    }
+  }
 
   const effectiveStation = stationMode==="manual" ? stationInput.trim() : station;
   const jobReady = po.trim() && material.trim() && qty.trim();
@@ -515,10 +546,20 @@ function LogUpdate({ stations, supervisors, onSaved }) {
     setScanMode(null);
     if (scanMode==="job") {
       const d = decodeQR(code);
-      setPo(d.production_number||"");
-      setMaterial(d.material_number||"");
-      setQty(d.quantity||"");
-      if (d.production_number) setStep(2);
+      const poVal = d.production_number || "";
+      setPo(poVal);
+      // Try library first, fall back to QR data
+      const found = library[poVal.trim()];
+      if (found) {
+        setMaterial(found.material || d.material_number || "");
+        setQty(found.qty || d.quantity || "");
+        setAutoFilled(true);
+      } else {
+        setMaterial(d.material_number || "");
+        setQty(d.quantity || "");
+        setAutoFilled(false);
+      }
+      if (poVal) setStep(2);
     }
     if (scanMode==="machine") {
       const found = stations.find(s => s.toUpperCase()===code.trim().toUpperCase());
@@ -552,7 +593,7 @@ function LogUpdate({ stations, supervisors, onSaved }) {
   function reset() {
     setPo(""); setMaterial(""); setQty("");
     setStation(""); setStationInput(""); setStationMode("dropdown");
-    setStatus(""); setSupervisor(""); setStep(1); setDone(false);
+    setStatus(""); setSupervisor(""); setStep(1); setDone(false); setAutoFilled(false);
   }
 
   if (done) return (
@@ -578,15 +619,20 @@ function LogUpdate({ stations, supervisors, onSaved }) {
           <div style={{ textAlign:"center", color:"#444", fontSize:10, marginBottom:14 }}>— or enter manually —</div>
           <div style={{ marginBottom:10 }}>
             <label style={S.label}>Production Order No. *</label>
-            <input style={S.input} value={po} onChange={e=>setPo(e.target.value)} placeholder="e.g. 100031646" />
+            <input style={S.input} value={po} onChange={e=>handlePoChange(e.target.value)} placeholder="e.g. 100031646" />
           </div>
+          {autoFilled && (
+            <div style={{ background:"#14532d33", border:"1px solid #22c55e", borderRadius:4, padding:"6px 12px", marginBottom:10, fontFamily:"monospace", fontSize:11, color:"#22c55e" }}>
+              Auto-filled from label library
+            </div>
+          )}
           <div style={{ marginBottom:10 }}>
             <label style={S.label}>Material No. *</label>
-            <input style={S.input} value={material} onChange={e=>setMaterial(e.target.value)} placeholder="e.g. M161501" />
+            <input style={{ ...S.input, borderColor: autoFilled ? "#22c55e44" : "#333" }} value={material} onChange={e=>setMaterial(e.target.value)} placeholder="e.g. M161501" />
           </div>
           <div style={{ marginBottom:16 }}>
             <label style={S.label}>Quantity *</label>
-            <input style={S.input} value={qty} onChange={e=>setQty(e.target.value)} placeholder="e.g. 10 Nos" />
+            <input style={{ ...S.input, borderColor: autoFilled ? "#22c55e44" : "#333" }} value={qty} onChange={e=>setQty(e.target.value)} placeholder="e.g. 10 Nos" />
           </div>
           <button style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13 }} onClick={()=>{ if(jobReady) setStep(2); }} disabled={!jobReady}>
             NEXT — SELECT MACHINE
