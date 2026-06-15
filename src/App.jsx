@@ -415,17 +415,17 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
                 if (!slot) return <div key={li} style={{ width:"64mm", height:"34mm", border:"0.2mm dashed #ddd", boxSizing:"border-box" }} />;
                 const qrData = makeQRData(slot.po, slot.material, slot.qty);
                 return (
-                  <div key={li} style={{ width:"64mm", height:"34mm", border:"0.3mm solid #aaa", display:"flex", flexDirection:"row", alignItems:"center", padding:"2mm", gap:"2mm", overflow:"hidden", boxSizing:"border-box" }}>
+                  <div key={li} style={{ width:"64mm", height:"34mm", border:"0.3mm solid #aaa", display:"flex", flexDirection:"row", alignItems:"center", padding:"2mm 2mm 2mm 5mm", gap:"3mm", overflow:"hidden", boxSizing:"border-box" }}>
                     <img
                       src={qrImageUrl(qrData)}
                       alt="QR"
-                      style={{ width:"26mm", height:"26mm", flexShrink:0, display:"block" }}
+                      style={{ width:"22mm", height:"22mm", flexShrink:0, display:"block" }}
                       onError={e=>{ e.target.style.display="none"; }}
                     />
                     <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", gap:"1.5mm", overflow:"hidden" }}>
-                      <div style={{ fontFamily:"Courier New, monospace", fontSize:"9pt", fontWeight:900, color:"#000", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>PO: {slot.po}</div>
-                      <div style={{ fontFamily:"Courier New, monospace", fontSize:"8pt", fontWeight:700, color:"#000", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>MAT: {slot.material}</div>
-                      <div style={{ fontFamily:"Courier New, monospace", fontSize:"8pt", fontWeight:700, color:"#000", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>QTY: {slot.qty}</div>
+                      <div style={{ fontFamily:"'Courier New',monospace", fontSize:"8.5pt", fontWeight:900, color:"#000", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>PO: {slot.po}</div>
+                      <div style={{ fontFamily:"'Courier New',monospace", fontSize:"7.5pt", fontWeight:700, color:"#000", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>MAT: {slot.material}</div>
+                      <div style={{ fontFamily:"'Courier New',monospace", fontSize:"7.5pt", fontWeight:700, color:"#000", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>QTY: {slot.qty}</div>
                     </div>
                   </div>
                 );
