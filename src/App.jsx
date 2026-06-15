@@ -1178,12 +1178,12 @@ function LabelLibrary() {
         </div>
 
         <div id="reprint-area">
-          <div style={{ width:"64mm", border:"0.3mm solid #aaa", display:"flex", alignItems:"center", padding:"1.5mm 2mm 1.5mm 1.5mm", gap:"1.5mm", background:"white", boxSizing:"border-box", height:"34mm", overflow:"hidden" }}>
-            <img src={qrImageUrl(qrData)} alt="QR" style={{ width:"24mm", height:"24mm", flexShrink:0, marginLeft:"1mm" }} />
+          <div style={{ width:"64mm", height:"34mm", border:"0.3mm solid #aaa", display:"flex", flexDirection:"row", alignItems:"center", padding:"2mm 2mm 2mm 5mm", gap:"3mm", background:"white", boxSizing:"border-box", overflow:"hidden" }}>
+            <img src={qrImageUrl(qrData)} alt="QR" style={{ width:"22mm", height:"22mm", flexShrink:0, display:"block" }} />
             <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column", justifyContent:"center", gap:"1.5mm" }}>
-              <div style={{ fontFamily:"Courier New,monospace", fontSize:"10pt", fontWeight:900, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>PO: {reprintJob.production_number}</div>
-              <div style={{ fontFamily:"Courier New,monospace", fontSize:"8pt", fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>MAT: {reprintJob.material_number}</div>
-              <div style={{ fontFamily:"Courier New,monospace", fontSize:"8pt", fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>QTY: {reprintJob.quantity}</div>
+              <div style={{ fontFamily:"'Courier New',monospace", fontSize:"8.5pt", fontWeight:900, color:"#000", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>PO: {reprintJob.production_number}</div>
+              <div style={{ fontFamily:"'Courier New',monospace", fontSize:"7.5pt", fontWeight:700, color:"#000", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>MAT: {reprintJob.material_number}</div>
+              <div style={{ fontFamily:"'Courier New',monospace", fontSize:"7.5pt", fontWeight:700, color:"#000", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>QTY: {reprintJob.quantity}</div>
             </div>
           </div>
         </div>
