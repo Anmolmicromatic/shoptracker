@@ -412,20 +412,20 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
           <div key={si} className="label-sheet" style={{ paddingTop: topMargin }}>
             <div className="label-grid">
               {sheet.map((slot, li) => {
-                if (!slot) return <div key={li} className="label-empty" />;
+                if (!slot) return <div key={li} style={{ width:"64mm", height:"34mm", border:"0.2mm dashed #ddd", boxSizing:"border-box" }} />;
                 const qrData = makeQRData(slot.po, slot.material, slot.qty);
                 return (
-                  <div key={li} className="label-cell">
+                  <div key={li} style={{ width:"64mm", height:"34mm", border:"0.3mm solid #aaa", display:"flex", flexDirection:"row", alignItems:"center", padding:"2mm", gap:"2mm", overflow:"hidden", boxSizing:"border-box" }}>
                     <img
-                      className="l-qr"
                       src={qrImageUrl(qrData)}
                       alt="QR"
+                      style={{ width:"26mm", height:"26mm", flexShrink:0, display:"block" }}
                       onError={e=>{ e.target.style.display="none"; }}
                     />
-                    <div className="label-txt">
-                      <div className="l-po">PO: {slot.po}</div>
-                      <div className="l-line">MAT: {slot.material}</div>
-                      <div className="l-line">QTY: {slot.qty}</div>
+                    <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", gap:"1.5mm", overflow:"hidden" }}>
+                      <div style={{ fontFamily:"Courier New, monospace", fontSize:"9pt", fontWeight:900, color:"#000", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>PO: {slot.po}</div>
+                      <div style={{ fontFamily:"Courier New, monospace", fontSize:"8pt", fontWeight:700, color:"#000", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>MAT: {slot.material}</div>
+                      <div style={{ fontFamily:"Courier New, monospace", fontSize:"8pt", fontWeight:700, color:"#000", lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>QTY: {slot.qty}</div>
                     </div>
                   </div>
                 );
