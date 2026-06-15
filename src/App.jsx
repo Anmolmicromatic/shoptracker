@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────
 const DEFAULT_STATIONS = ["BL-01","BM-01","BM-03","CG-21","Contractor","Other","DR-31","DR-33","DR-34","FT_T","GC-21","GC-23","GC-31","GC-32","GC-33","GC-34","GC-51","HM-51","HM-52","JB-51","Leak test","LT-34","LT-35","MR-22","MR-23","MV-34","MV-36","Paint/Primer","QA_MFG","REC","SG-21","SG-31","SG-32","SG-33","SG-52","SH-21","TL-32","TL-33","TL-34","VNDR","VM-31","VM-32","VM-33","VM-34","VM-35"];
-const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Sachin","Other"];
+const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
 const STATUSES = ["Running","WIP","Completed","Hold"];
 const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Completed:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
 
@@ -466,8 +466,8 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
           display: flex;
           flex-direction: row;
           align-items: center;
-          padding: 1.5mm 2mm 1.5mm 2mm;
-          gap: 2mm;
+          padding: 2mm;
+          gap: 0;
           overflow: hidden;
           box-sizing: border-box;
         }
@@ -478,22 +478,22 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
           box-sizing: border-box;
         }
         .l-qr {
-          width: 26mm;
-          height: 26mm;
-          flex-shrink: 0;
+          width: 28mm;
+          height: 28mm;
+          flex: 0 0 28mm;
           display: block;
         }
         .label-txt {
-          flex: 1;
-          overflow: hidden;
+          flex: 0 0 30mm;
+          width: 30mm;
           display: flex;
           flex-direction: column;
           justify-content: center;
           gap: 2mm;
-          min-width: 0;
+          padding-left: 2mm;
         }
-        .l-po   { font-family: Courier New, monospace; font-size: 9.5pt; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.1; }
-        .l-line { font-family: Courier New, monospace; font-size: 8pt;   font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.2; }
+        .l-po   { font-family: Courier New, monospace; font-size: 9pt; font-weight: 900; white-space: nowrap; color: #000; line-height: 1.2; }
+        .l-line { font-family: Courier New, monospace; font-size: 7.5pt; font-weight: 700; white-space: nowrap; color: #000; line-height: 1.2; }
       `}</style>
     </div>
   );
