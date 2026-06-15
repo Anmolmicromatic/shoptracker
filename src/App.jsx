@@ -464,9 +464,10 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
           height: 34mm;
           border: 0.3mm solid #aaa;
           display: flex;
+          flex-direction: row;
           align-items: center;
-          padding: 1.5mm 2mm 1.5mm 1.5mm;
-          gap: 1.5mm;
+          padding: 1.5mm 2mm 1.5mm 2mm;
+          gap: 2mm;
           overflow: hidden;
           box-sizing: border-box;
         }
@@ -477,11 +478,10 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
           box-sizing: border-box;
         }
         .l-qr {
-          width: 24mm;
-          height: 24mm;
+          width: 26mm;
+          height: 26mm;
           flex-shrink: 0;
           display: block;
-          margin-left: 1mm;
         }
         .label-txt {
           flex: 1;
@@ -489,12 +489,11 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
           display: flex;
           flex-direction: column;
           justify-content: center;
-          gap: 1.5mm;
+          gap: 2mm;
           min-width: 0;
-          padding-right: 1mm;
         }
-        .l-po   { font-family: Courier New, monospace; font-size: 10pt; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.1; }
-        .l-line { font-family: Courier New, monospace; font-size: 8pt;  font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.2; }
+        .l-po   { font-family: Courier New, monospace; font-size: 9.5pt; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.1; }
+        .l-line { font-family: Courier New, monospace; font-size: 8pt;   font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.2; }
       `}</style>
     </div>
   );
