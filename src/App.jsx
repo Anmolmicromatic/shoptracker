@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────
 const DEFAULT_STATIONS = ["BL-01","BM-01","BM-03","CG-21","Contractor","Other","DR-31","DR-33","DR-34","FT_T","GC-21","GC-23","GC-31","GC-32","GC-33","GC-34","GC-51","HM-51","HM-52","JB-51","Leak test","LT-34","LT-35","MR-22","MR-23","MV-34","MV-36","Paint/Primer","QA_MFG","REC","SG-21","SG-31","SG-32","SG-33","SG-52","SH-21","TL-32","TL-33","TL-34","VNDR","VM-31","VM-32","VM-33","VM-34","VM-35"];
-const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
+const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Sachin","Other"];
 const STATUSES = ["Running","WIP","Completed","Hold"];
 const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Completed:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
 
@@ -82,6 +82,52 @@ function qrImageUrl(data) {
   return `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(data)}`;
 }
 function fmt(dt) { if (!dt) return "-"; return new Date(dt).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}); }
+
+// ─── SUPERVISOR LOGIN (persisted per device) ──────────────────────────────
+const LOGIN_KEY = "shoptrack_supervisor";
+function getLoggedInSupervisor() { try { return localStorage.getItem(LOGIN_KEY) || ""; } catch(e) { return ""; } }
+function setLoggedInSupervisor(name) { try { if (name) localStorage.setItem(LOGIN_KEY, name); else localStorage.removeItem(LOGIN_KEY); } catch(e) {} }
+
+function lastUsedKey(supervisor) { return `shoptrack_last_${supervisor}`; }
+function getLastUsed(supervisor) {
+  try { const raw = localStorage.getItem(lastUsedKey(supervisor)); return raw ? JSON.parse(raw) : {}; }
+  catch(e) { return {}; }
+}
+function setLastUsed(supervisor, vals) {
+  try { localStorage.setItem(lastUsedKey(supervisor), JSON.stringify(vals)); } catch(e) {}
+}
+
+function SupervisorLogin({ supervisors, onLogin }) {
+  return (
+    <div style={{ minHeight:"100vh", padding:24, display:"flex", flexDirection:"column", alignItems:"center", gap:20 }}>
+      <div style={{ ...S.card, maxWidth:380, width:"100%", marginTop:24 }}>
+        <div style={{ textAlign:"center", marginBottom:6 }}>
+          <div style={{ fontSize:13, fontWeight:700, letterSpacing:"0.15em", color:"#d4a853", textTransform:"uppercase" }}>SHOPTRACK</div>
+        </div>
+        <div style={{ ...S.sectionTitle, textAlign:"center", borderBottom:"none" }}>Who is logging in?</div>
+        <div style={{ display:"grid", gap:8 }}>
+          {supervisors.map(s => (
+            <button
+              key={s}
+              onClick={() => onLogin(s)}
+              style={{ ...S.btn("ghost"), padding:"14px", fontSize:13, textAlign:"left", display:"flex", alignItems:"center", gap:10 }}
+            >
+              <span style={{ width:26, height:26, borderRadius:"50%", background:"#333", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"#d4a853", flexShrink:0 }}>{s[0]}</span>
+              {s}
+            </button>
+          ))}
+        </div>
+        <div style={{ fontFamily:"monospace", fontSize:10, color:"#444", textAlign:"center", marginTop:14 }}>
+          This stays logged in on this device until you switch
+        </div>
+      </div>
+
+      <div style={{ maxWidth:480, width:"100%" }}>
+        <SupervisorDashboard supervisors={supervisors} />
+      </div>
+    </div>
+  );
+}
 
 // ─── STYLES ────────────────────────────────────────────────────────────────
 const S = {
@@ -500,8 +546,9 @@ function LabelPrintPage({ rows, startPos, onBack, profile="method" }) {
 }
 
 // ─── LOG UPDATE ────────────────────────────────────────────────────────────
-function LogUpdate({ stations, supervisors, onSaved }) {
+function LogUpdate({ stations, supervisor, onSaved }) {
   const [scanMode, setScanMode] = useState(null);
+  const lastUsed = getLastUsed(supervisor);
 
   // Job fields
   const [poInput, setPoInput] = useState("");
@@ -512,14 +559,13 @@ function LogUpdate({ stations, supervisors, onSaved }) {
   const [manualEntry, setManualEntry] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
 
-  // Machine
-  const [station, setStation] = useState("");
+  // Machine — pre-filled with this supervisor's last used work center (still editable)
+  const [station, setStation] = useState(stations.includes(lastUsed.station) ? lastUsed.station : "");
   const [stationInput, setStationInput] = useState("");
   const [stationMode, setStationMode] = useState("dropdown");
 
-  // Status & supervisor
-  const [status, setStatus] = useState("");
-  const [supervisor, setSupervisor] = useState("");
+  // Status — pre-filled with this supervisor's last used status (still editable)
+  const [status, setStatus] = useState(lastUsed.status || "");
 
   // Save
   const [saving, setSaving] = useState(false);
@@ -604,7 +650,7 @@ function LogUpdate({ stations, supervisors, onSaved }) {
     }
   }
 
-  const canSave = poInput.trim() && material.trim() && qty.trim() && effectiveStation && status && supervisor;
+  const canSave = poInput.trim() && material.trim() && qty.trim() && effectiveStation && status;
 
   async function save() {
     if (!canSave) return;
@@ -621,6 +667,7 @@ function LogUpdate({ stations, supervisors, onSaved }) {
         created_at: new Date().toISOString()
       });
       if (navigator.vibrate) navigator.vibrate(200);
+      setLastUsed(supervisor, { station: effectiveStation, status });
       setDone(true);
       setTimeout(() => { onSaved(); reset(); }, 1500);
     } catch(e) { alert("Save failed: " + e.message); }
@@ -629,8 +676,9 @@ function LogUpdate({ stations, supervisors, onSaved }) {
 
   function reset() {
     setPoInput(""); setMaterial(""); setQty("");
-    setStation(""); setStationInput(""); setStationMode("dropdown");
-    setStatus(""); setSupervisor("");
+    const lu = getLastUsed(supervisor);
+    setStation(stations.includes(lu.station) ? lu.station : ""); setStationInput(""); setStationMode("dropdown");
+    setStatus(lu.status || "");
     setPoError(""); setAutoFilled(false); setManualEntry(false); setSuggestions([]);
     setDone(false); setSaving(false);
   }
@@ -785,13 +833,13 @@ function LogUpdate({ stations, supervisors, onSaved }) {
         </div>
       </div>
 
-      {/* ── SUPERVISOR ── */}
-      <div style={{ ...S.card, marginBottom:16 }}>
-        <label style={S.label}>Supervisor *</label>
-        <select style={S.select} value={supervisor} onChange={e=>setSupervisor(e.target.value)}>
-          <option value="">-- Select Supervisor --</option>
-          {supervisors.map(s=><option key={s}>{s}</option>)}
-        </select>
+      {/* ── SUPERVISOR (logged in) ── */}
+      <div style={{ ...S.card, marginBottom:16, display:"flex", alignItems:"center", gap:10 }}>
+        <span style={{ width:26, height:26, borderRadius:"50%", background:"#333", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"#d4a853", flexShrink:0 }}>{supervisor[0]}</span>
+        <div>
+          <div style={S.label}>Logged in as</div>
+          <div style={{ fontFamily:"monospace", fontSize:13, fontWeight:700, color:"#e8e2d4" }}>{supervisor}</div>
+        </div>
       </div>
 
       {/* ── SAVE ── */}
@@ -806,9 +854,71 @@ function LogUpdate({ stations, supervisors, onSaved }) {
          !qty.trim() ? "ENTER QUANTITY" :
          !effectiveStation ? "SELECT MACHINE" :
          !status ? "SELECT STATUS" :
-         !supervisor ? "SELECT SUPERVISOR" :
          "✓  OK — SAVE UPDATE"}
       </button>
+    </div>
+  );
+}
+
+// ─── SUPERVISOR DASHBOARD ──────────────────────────────────────────────────
+function SupervisorDashboard({ supervisors }) {
+  const [updates, setUpdates] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    try { setUpdates(await db.getAllUpdates() || []); }
+    catch(e) { console.error(e); }
+    setLoading(false);
+  }
+  useEffect(()=>{ load(); }, []);
+
+  function isSameDay(d1, d2) { return d1.toDateString() === d2.toDateString(); }
+
+  const now = new Date();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate()-1);
+
+  const rows = supervisors.map(s => {
+    const own = updates.filter(u => u.supervisor === s);
+    const today = own.filter(u => isSameDay(new Date(u.created_at), now)).length;
+    const yest = own.filter(u => isSameDay(new Date(u.created_at), yesterday)).length;
+    const last = own.length ? own.reduce((a,b) => new Date(a.created_at) > new Date(b.created_at) ? a : b) : null;
+    return { name: s, today, yest, lastAt: last?.created_at || null };
+  });
+
+  return (
+    <div style={{ padding:16 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <div style={S.sectionTitle}>SUPERVISOR ACTIVITY</div>
+        <button style={{ ...S.btn("ghost"), fontSize:10, padding:"6px 12px" }} onClick={load}>REFRESH</button>
+      </div>
+      {loading && <div style={{ textAlign:"center", color:"#555", fontFamily:"monospace", padding:32 }}>LOADING...</div>}
+      {!loading && (
+        <div style={{ overflowX:"auto", border:"1px solid #2a2a2a", borderRadius:6 }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"monospace", fontSize:12, minWidth:480 }}>
+            <thead>
+              <tr style={{ background:"#111" }}>
+                {["Supervisor","Yesterday Scans","Today Scans","Last Scan At"].map(h=>(
+                  <th key={h} style={{ padding:"9px 12px", textAlign:"left", color:"#555", fontWeight:700, borderBottom:"1px solid #2a2a2a", fontSize:10, whiteSpace:"nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r,i)=>(
+                <tr key={r.name} style={{ borderBottom:"1px solid #1a1a1a", background:i%2===0?"transparent":"#0d0d0d" }}>
+                  <td style={{ padding:"10px 12px", display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ width:22, height:22, borderRadius:"50%", background:"#333", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#d4a853", flexShrink:0 }}>{r.name[0]}</span>
+                    <span style={{ color:"#e8e2d4", fontWeight:700 }}>{r.name}</span>
+                  </td>
+                  <td style={{ padding:"10px 12px", color:"#888" }}>{r.yest}</td>
+                  <td style={{ padding:"10px 12px", color:"#22c55e", fontWeight:700 }}>{r.today}</td>
+                  <td style={{ padding:"10px 12px", color:"#555", whiteSpace:"nowrap" }}>{fmt(r.lastAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -822,6 +932,7 @@ function JobStatus() {
   const [searchMat, setSearchMat] = useState("");
   const [searchMachine, setSearchMachine] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
+  const [filterFinal, setFilterFinal] = useState("All");
 
   async function load() {
     setLoading(true);
@@ -851,15 +962,25 @@ function JobStatus() {
   }
 
   let rows = Object.values(latestByPO);
+
+  // Final completion: a PO is "Completed" once it has any update at QA_MFG with status Completed
+  const completedPOs = new Set(
+    (updates||[])
+      .filter(u => (u.station||"").trim().toUpperCase() === "QA_MFG" && u.status === "Completed")
+      .map(u => u.production_number)
+  );
+  rows = rows.map(r => ({ ...r, finalStatus: completedPOs.has(r.po) ? "Completed" : "In Process" }));
+
   if (searchPO) rows = rows.filter(r=>r.po?.toLowerCase().includes(searchPO.toLowerCase()));
   if (searchMat) rows = rows.filter(r=>r.material_no?.toLowerCase().includes(searchMat.toLowerCase())||r.description?.toLowerCase().includes(searchMat.toLowerCase()));
   if (searchMachine) rows = rows.filter(r=>r.machine?.toLowerCase().includes(searchMachine.toLowerCase()));
   if (filterStatus!=="All") rows = rows.filter(r=>r.status===filterStatus);
+  if (filterFinal!=="All") rows = rows.filter(r=>r.finalStatus===filterFinal);
   rows.sort((a,b)=>new Date(b.last_updated)-new Date(a.last_updated));
 
   function exportExcel() {
     if (!window.XLSX) { alert("Try again"); return; }
-    const ws = window.XLSX.utils.aoa_to_sheet([["PO No","Material No","Description","Quantity","Machine","Status","Supervisor","Last Updated"],...rows.map(r=>[r.po,r.material_no,r.description,r.quantity,r.machine,r.status,r.supervisor,fmt(r.last_updated)])]);
+    const ws = window.XLSX.utils.aoa_to_sheet([["PO No","Material No","Description","Quantity","Machine","Status","Final Status","Supervisor","Last Updated"],...rows.map(r=>[r.po,r.material_no,r.description,r.quantity,r.machine,r.status,r.finalStatus,r.supervisor,fmt(r.last_updated)])]);
     const wb = window.XLSX.utils.book_new();
     window.XLSX.utils.book_append_sheet(wb, ws, "Job Status");
     window.XLSX.writeFile(wb, `job_status_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -867,24 +988,41 @@ function JobStatus() {
 
   const counts = {};
   STATUSES.forEach(s=>counts[s]=Object.values(latestByPO).filter(r=>r.status===s).length);
+  const completedCount = Object.values(latestByPO).filter(r=>completedPOs.has(r.po)).length;
 
   return (
     <div style={{ padding:16 }}>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:14 }}>
-        {[["TOTAL",Object.keys(latestByPO).length,"#d4a853"],["RUNNING",counts.Running||0,"#22c55e"],["ON HOLD",counts.Hold||0,"#ef4444"]].map(([l,v,c])=>(
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8, marginBottom:14 }}>
+        {[["TOTAL",Object.keys(latestByPO).length,"#d4a853"],["RUNNING",counts.Running||0,"#22c55e"],["ON HOLD",counts.Hold||0,"#ef4444"],["JOB COMPLETED",completedCount,"#8b5cf6"]].map(([l,v,c])=>(
           <div key={l} style={{ ...S.card, padding:"10px 12px" }}>
             <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase" }}>{l}</div>
             <div style={{ fontFamily:"monospace", fontSize:24, fontWeight:700, color:c }}>{v}</div>
           </div>
         ))}
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:10 }}>
-        <input style={S.input} value={searchPO} onChange={e=>setSearchPO(e.target.value)} placeholder="Search PO..." />
-        <input style={S.input} value={searchMat} onChange={e=>setSearchMat(e.target.value)} placeholder="Search Material..." />
-        <input style={S.input} value={searchMachine} onChange={e=>setSearchMachine(e.target.value)} placeholder="Search Machine..." />
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))", gap:8, marginBottom:10 }}>
+        <div>
+          <label style={S.label}>Search PO</label>
+          <input style={S.input} value={searchPO} onChange={e=>setSearchPO(e.target.value)} placeholder="e.g. 2338" />
+        </div>
+        <div>
+          <label style={S.label}>Search Material</label>
+          <input style={S.input} value={searchMat} onChange={e=>setSearchMat(e.target.value)} placeholder="e.g. M161501" />
+        </div>
+        <div>
+          <label style={S.label}>Search Machine</label>
+          <input style={S.input} value={searchMachine} onChange={e=>setSearchMachine(e.target.value)} placeholder="e.g. BM-03" />
+        </div>
+      </div>
+      <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:6 }}>
+        {["All",...STATUSES].map(s=><button key={s} style={S.tab(filterStatus===s)} onClick={()=>setFilterStatus(s)}>{s}</button>)}
       </div>
       <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:10 }}>
-        {["All",...STATUSES].map(s=><button key={s} style={S.tab(filterStatus===s)} onClick={()=>setFilterStatus(s)}>{s}</button>)}
+        {["All","Completed","In Process"].map(s=>(
+          <button key={s} style={S.tab(filterFinal===s)} onClick={()=>setFilterFinal(s)}>
+            {s==="All" ? "ALL JOBS" : s.toUpperCase()}
+          </button>
+        ))}
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
         <span style={{ fontFamily:"monospace", fontSize:11, color:"#555" }}>{rows.length} jobs · <span style={{ cursor:"pointer", color:"#d4a853" }} onClick={load}>refresh</span></span>
@@ -893,16 +1031,16 @@ function JobStatus() {
       {loading && <div style={{ textAlign:"center", color:"#555", fontFamily:"monospace", padding:32 }}>LOADING...</div>}
       {!loading && (
         <div style={{ overflowX:"auto", border:"1px solid #2a2a2a", borderRadius:6 }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"monospace", fontSize:11, minWidth:700 }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"monospace", fontSize:11, minWidth:800 }}>
             <thead>
               <tr style={{ background:"#111" }}>
-                {["PO No","Material No","Description","Qty","Machine","Status","Supervisor","Last Updated",""].map(h=>(
+                {["PO No","Material No","Description","Qty","Machine","Status","Final Status","Supervisor","Last Updated",""].map(h=>(
                   <th key={h} style={{ padding:"9px 12px", textAlign:"left", color:"#555", fontWeight:700, borderBottom:"1px solid #2a2a2a", fontSize:10, whiteSpace:"nowrap" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.length===0 && <tr><td colSpan={9} style={{ padding:32, textAlign:"center", color:"#444" }}>No records yet</td></tr>}
+              {rows.length===0 && <tr><td colSpan={10} style={{ padding:32, textAlign:"center", color:"#444" }}>No records yet</td></tr>}
               {rows.map((r,i) => (
                 <tr key={i} style={{ borderBottom:"1px solid #1a1a1a", background:i%2===0?"transparent":"#0d0d0d" }}>
                   <td style={{ padding:"8px 12px", color:"#d4a853", fontWeight:700 }}>{r.po}</td>
@@ -911,6 +1049,11 @@ function JobStatus() {
                   <td style={{ padding:"8px 12px", color:"#888" }}>{r.quantity}</td>
                   <td style={{ padding:"8px 12px" }}>{r.machine}</td>
                   <td style={{ padding:"8px 12px" }}><span style={S.statusPill(r.status)}>{r.status}</span></td>
+                  <td style={{ padding:"8px 12px" }}>
+                    <span style={{ display:"inline-block", padding:"2px 10px", borderRadius:3, fontSize:10, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", background: r.finalStatus==="Completed" ? "#8b5cf622" : "#88888822", color: r.finalStatus==="Completed" ? "#8b5cf6" : "#888", border: `1px solid ${r.finalStatus==="Completed" ? "#8b5cf644" : "#88888844"}` }}>
+                      {r.finalStatus}
+                    </span>
+                  </td>
                   <td style={{ padding:"8px 12px", color:"#888" }}>{r.supervisor}</td>
                   <td style={{ padding:"8px 12px", color:"#555", whiteSpace:"nowrap" }}>{fmt(r.last_updated)}</td>
                   <td style={{ padding:"4px 8px" }}><button onClick={()=>deleteRow(r.po)} style={{ background:"none", border:"1px solid #333", color:"#ef4444", borderRadius:3, padding:"2px 8px", cursor:"pointer", fontFamily:"monospace", fontSize:10 }}>DEL</button></td>
@@ -1276,6 +1419,7 @@ export default function App() {
   const [page, setPage] = useState("log");
   const [stations, setStations] = useState(DEFAULT_STATIONS);
   const [supervisors, setSupervisors] = useState(DEFAULT_SUPERVISORS);
+  const [supervisor, setSupervisor] = useState(getLoggedInSupervisor());
 
   useEffect(() => {
     db.getSettings().then(rows => {
@@ -1290,6 +1434,24 @@ export default function App() {
     }).catch(()=>{});
   }, []);
 
+  function handleLogin(name) {
+    setLoggedInSupervisor(name);
+    setSupervisor(name);
+  }
+  function handleSwitch() {
+    setLoggedInSupervisor("");
+    setSupervisor("");
+  }
+
+  if (!supervisor) {
+    return (
+      <div style={S.page}>
+        <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet" />
+        <SupervisorLogin supervisors={supervisors} onLogin={handleLogin} />
+      </div>
+    );
+  }
+
   const TABS = [
     { id:"log",     label:"LOG UPDATE" },
     { id:"labels",  label:"PRINT LABELS" },
@@ -1303,12 +1465,19 @@ export default function App() {
     <div style={S.page}>
       <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet" />
       <div style={S.nav}>
-        <div style={S.navTitle}>SHOPTRACK</div>
+        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+          <div style={S.navTitle}>SHOPTRACK</div>
+          <div style={{ display:"flex", alignItems:"center", gap:6, fontFamily:"monospace", fontSize:10, color:"#888" }}>
+            <span style={{ width:18, height:18, borderRadius:"50%", background:"#333", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, color:"#d4a853" }}>{supervisor[0]}</span>
+            {supervisor}
+            <button onClick={handleSwitch} style={{ background:"none", border:"1px solid #333", color:"#666", borderRadius:3, padding:"2px 6px", cursor:"pointer", fontFamily:"monospace", fontSize:9 }}>SWITCH</button>
+          </div>
+        </div>
         <div style={S.navTabs}>
           {TABS.map(t => <button key={t.id} style={S.tab(page===t.id)} onClick={()=>setPage(t.id)}>{t.label}</button>)}
         </div>
       </div>
-      {page==="log"    && <LogUpdate stations={stations} supervisors={supervisors} onSaved={()=>setPage("status")} />}
+      {page==="log"    && <LogUpdate stations={stations} supervisor={supervisor} onSaved={()=>setPage("status")} />}
       {page==="labels" && <PrintLabels />}
       {page==="status" && <JobStatus />}
       {page==="library" && <LabelLibrary />}
