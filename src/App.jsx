@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────
 const DEFAULT_STATIONS = ["BL-01","BM-01","BM-03","CG-21","Contractor","Other","DR-31","DR-33","DR-34","FT_T","GC-21","GC-23","GC-31","GC-32","GC-33","GC-34","GC-51","HM-51","HM-52","JB-51","Leak test","LT-34","LT-35","MR-22","MR-23","MV-34","MV-36","Paint/Primer","QA_MFG","REC","SG-21","SG-31","SG-32","SG-33","SG-52","SH-21","TL-32","TL-33","TL-34","VNDR","VM-31","VM-32","VM-33","VM-34","VM-35"];
-const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Sachin","Other"];
+const DEFAULT_SUPERVISORS = ["Ritesh","Muzzamil","Sanjeev","Raju","Deepak"];
 const STATUSES = ["Running","WIP","Completed","Hold"];
 const STATUS_COLORS = { Running:"#22c55e", WIP:"#3b82f6", Completed:"#8b5cf6", Hold:"#ef4444", Pending:"#f59e0b" };
 
@@ -693,24 +693,30 @@ function LogUpdate({ stations, supervisor, onSaved }) {
   );
 
   return (
-    <div style={{ padding:16, maxWidth:520, margin:"0 auto" }}>
+    <div style={{ padding:"12px 14px", maxWidth:520, margin:"0 auto" }}>
       {scanMode && <QRScanner onResult={handleQRScan} onClose={()=>setScanMode(null)} />}
+
+      {/* ── TOP STRIP: logged in as ── */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10, fontFamily:"monospace", fontSize:11, color:"#888" }}>
+        <span style={{ width:20, height:20, borderRadius:"50%", background:"#333", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#d4a853", flexShrink:0 }}>{supervisor[0]}</span>
+        Logged in as <span style={{ color:"#e8e2d4", fontWeight:700 }}>{supervisor}</span>
+      </div>
 
       {/* ── SCAN BUTTON ── */}
       <button
-        style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:14, marginBottom:16, letterSpacing:"0.1em" }}
+        style={{ ...S.btn("primary"), width:"100%", padding:"12px", fontSize:13, marginBottom:10 }}
         onClick={()=>setScanMode("job")}
       >
         ▣  SCAN JOB LABEL QR
       </button>
 
-      <div style={{ textAlign:"center", color:"#444", fontSize:10, marginBottom:14, fontFamily:"monospace" }}>— or enter PO number (full or last 4 digits) —</div>
+      <div style={{ textAlign:"center", color:"#444", fontSize:9, marginBottom:10, fontFamily:"monospace" }}>— or enter PO number (full or last 4 digits) —</div>
 
       {/* ── PO INPUT ── */}
-      <div style={{ ...S.card, marginBottom:12 }}>
+      <div style={{ ...S.card, padding:"12px 14px", marginBottom:10 }}>
 
         {/* PO Number */}
-        <div style={{ marginBottom:10, position:"relative" }}>
+        <div style={{ marginBottom:8, position:"relative" }}>
           <label style={S.label}>Production Order No.</label>
           <input
             style={{ ...S.input, borderColor: poError ? "#ef4444" : autoFilled ? "#22c55e44" : "#333" }}
@@ -756,14 +762,14 @@ function LogUpdate({ stations, supervisor, onSaved }) {
 
         {/* Auto-filled indicator */}
         {autoFilled && (
-          <div style={{ background:"#14532d33", border:"1px solid #22c55e44", borderRadius:4, padding:"5px 10px", marginBottom:10, fontFamily:"monospace", fontSize:10, color:"#22c55e" }}>
+          <div style={{ background:"#14532d33", border:"1px solid #22c55e44", borderRadius:4, padding:"5px 10px", marginBottom:8, fontFamily:"monospace", fontSize:10, color:"#22c55e" }}>
             ✓ Auto-filled from label library
           </div>
         )}
 
         {/* PO Error */}
         {poError && (
-          <div style={{ background:"#7f1d1d33", border:"1px solid #ef444444", borderRadius:4, padding:"5px 10px", marginBottom:10, fontFamily:"monospace", fontSize:10, color:"#ef4444" }}>
+          <div style={{ background:"#7f1d1d33", border:"1px solid #ef444444", borderRadius:4, padding:"5px 10px", marginBottom:8, fontFamily:"monospace", fontSize:10, color:"#ef4444" }}>
             ⚠ {poError}
           </div>
         )}
@@ -802,7 +808,7 @@ function LogUpdate({ stations, supervisor, onSaved }) {
       </div>
 
       {/* ── MACHINE ── */}
-      <div style={{ ...S.card, marginBottom:12 }}>
+      <div style={{ ...S.card, padding:"12px 14px", marginBottom:10 }}>
         <label style={S.label}>Machine / Work Center *</label>
         <div style={{ display:"flex", gap:6, marginBottom:8 }}>
           <button style={{ ...S.tab(stationMode==="dropdown"), flex:1, padding:"6px" }} onClick={()=>setStationMode("dropdown")}>LIST</button>
@@ -822,29 +828,20 @@ function LogUpdate({ stations, supervisor, onSaved }) {
       </div>
 
       {/* ── STATUS ── */}
-      <div style={{ ...S.card, marginBottom:12 }}>
+      <div style={{ ...S.card, padding:"12px 14px", marginBottom:14 }}>
         <label style={S.label}>Status *</label>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
           {STATUSES.map(s => (
-            <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, minWidth:70, padding:"10px 6px", borderRadius:4, fontSize:11, fontFamily:"monospace", fontWeight:700, cursor:"pointer", textTransform:"uppercase", border:`1px solid ${status===s?STATUS_COLORS[s]:"#333"}`, background:status===s?STATUS_COLORS[s]:"#111", color:status===s?"#0f0f0f":"#888" }}>
+            <button key={s} onClick={()=>setStatus(s)} style={{ flex:1, minWidth:70, padding:"9px 6px", borderRadius:4, fontSize:11, fontFamily:"monospace", fontWeight:700, cursor:"pointer", textTransform:"uppercase", border:`1px solid ${status===s?STATUS_COLORS[s]:"#333"}`, background:status===s?STATUS_COLORS[s]:"#111", color:status===s?"#0f0f0f":"#888" }}>
               {s}
             </button>
           ))}
         </div>
       </div>
 
-      {/* ── SUPERVISOR (logged in) ── */}
-      <div style={{ ...S.card, marginBottom:16, display:"flex", alignItems:"center", gap:10 }}>
-        <span style={{ width:26, height:26, borderRadius:"50%", background:"#333", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, color:"#d4a853", flexShrink:0 }}>{supervisor[0]}</span>
-        <div>
-          <div style={S.label}>Logged in as</div>
-          <div style={{ fontFamily:"monospace", fontSize:13, fontWeight:700, color:"#e8e2d4" }}>{supervisor}</div>
-        </div>
-      </div>
-
       {/* ── SAVE ── */}
       <button
-        style={{ ...S.btn("primary"), width:"100%", padding:"16px", fontSize:14, letterSpacing:"0.15em", opacity: canSave ? 1 : 0.5 }}
+        style={{ ...S.btn("primary"), width:"100%", padding:"14px", fontSize:13, letterSpacing:"0.1em", opacity: canSave ? 1 : 0.5 }}
         onClick={save}
         disabled={saving || !canSave}
       >
@@ -1464,8 +1461,8 @@ export default function App() {
   return (
     <div style={S.page}>
       <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      <div style={S.nav}>
-        <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+      <div style={{ background:"#1a1a1a", borderBottom:"1px solid #2a2a2a", position:"sticky", top:0, zIndex:100 }}>
+        <div style={{ padding:"10px 12px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
           <div style={S.navTitle}>SHOPTRACK</div>
           <div style={{ display:"flex", alignItems:"center", gap:6, fontFamily:"monospace", fontSize:10, color:"#888" }}>
             <span style={{ width:18, height:18, borderRadius:"50%", background:"#333", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, color:"#d4a853" }}>{supervisor[0]}</span>
@@ -1473,8 +1470,8 @@ export default function App() {
             <button onClick={handleSwitch} style={{ background:"none", border:"1px solid #333", color:"#666", borderRadius:3, padding:"2px 6px", cursor:"pointer", fontFamily:"monospace", fontSize:9 }}>SWITCH</button>
           </div>
         </div>
-        <div style={S.navTabs}>
-          {TABS.map(t => <button key={t.id} style={S.tab(page===t.id)} onClick={()=>setPage(t.id)}>{t.label}</button>)}
+        <div style={{ display:"flex", gap:3, overflowX:"auto", whiteSpace:"nowrap", padding:"0 12px 8px", WebkitOverflowScrolling:"touch" }}>
+          {TABS.map(t => <button key={t.id} style={{ ...S.tab(page===t.id), flexShrink:0 }} onClick={()=>setPage(t.id)}>{t.label}</button>)}
         </div>
       </div>
       {page==="log"    && <LogUpdate stations={stations} supervisor={supervisor} onSaved={()=>setPage("status")} />}
