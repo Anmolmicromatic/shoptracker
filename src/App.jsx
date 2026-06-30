@@ -894,29 +894,29 @@ function SupervisorDashboard({ supervisors }) {
       </div>
       {loading && <div style={{ textAlign:"center", color:"#555", fontFamily:"monospace", padding:32 }}>LOADING...</div>}
       {!loading && (
-        <div style={{ overflowX:"auto", border:"1px solid #2a2a2a", borderRadius:6 }}>
-          <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"monospace", fontSize:12, minWidth:480 }}>
-            <thead>
-              <tr style={{ background:"#111" }}>
-                {["Supervisor","Yesterday Scans","Today Scans","Last Scan At"].map(h=>(
-                  <th key={h} style={{ padding:"9px 12px", textAlign:"left", color:"#555", fontWeight:700, borderBottom:"1px solid #2a2a2a", fontSize:10, whiteSpace:"nowrap" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r,i)=>(
-                <tr key={r.name} style={{ borderBottom:"1px solid #1a1a1a", background:i%2===0?"transparent":"#0d0d0d" }}>
-                  <td style={{ padding:"10px 12px", display:"flex", alignItems:"center", gap:8 }}>
-                    <span style={{ width:22, height:22, borderRadius:"50%", background:"#333", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#d4a853", flexShrink:0 }}>{r.name[0]}</span>
-                    <span style={{ color:"#e8e2d4", fontWeight:700 }}>{r.name}</span>
-                  </td>
-                  <td style={{ padding:"10px 12px", color:"#888" }}>{r.yest}</td>
-                  <td style={{ padding:"10px 12px", color:"#22c55e", fontWeight:700 }}>{r.today}</td>
-                  <td style={{ padding:"10px 12px", color:"#555", whiteSpace:"nowrap" }}>{fmt(r.lastAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ display:"grid", gap:8 }}>
+          {rows.map(r=>(
+            <div key={r.name} style={{ ...S.card, padding:"12px 14px" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                <span style={{ width:24, height:24, borderRadius:"50%", background:"#333", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#d4a853", flexShrink:0 }}>{r.name[0]}</span>
+                <span style={{ color:"#e8e2d4", fontWeight:700, fontFamily:"monospace", fontSize:13 }}>{r.name}</span>
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+                <div>
+                  <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase", letterSpacing:"0.08em" }}>Yesterday</div>
+                  <div style={{ fontFamily:"monospace", fontSize:15, fontWeight:700, color:"#888" }}>{r.yest}</div>
+                </div>
+                <div>
+                  <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase", letterSpacing:"0.08em" }}>Today</div>
+                  <div style={{ fontFamily:"monospace", fontSize:15, fontWeight:700, color:"#22c55e" }}>{r.today}</div>
+                </div>
+                <div>
+                  <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase", letterSpacing:"0.08em" }}>Last Scan</div>
+                  <div style={{ fontFamily:"monospace", fontSize:11, fontWeight:700, color:"#aaa" }}>{fmt(r.lastAt)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
