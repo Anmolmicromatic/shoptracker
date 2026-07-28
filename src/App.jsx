@@ -45,6 +45,11 @@ const db = {
   getLibrary: () => sbFetch("jobs?select=production_number,material_number,quantity,description&order=created_at.desc&limit=5000"),
   deleteJob: (id) => sbFetch(`jobs?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
   getAllUpdatesForReport: () => sbFetch("job_updates?select=production_number,material_number,station,status,supervisor,created_at,job_id&order=created_at.asc&limit=20000"),
+  getLeadTimeReport: () => sbFetch("lead_time_report?select=*&order=job_created.desc&limit=5000"),
+  getArchiveSummaries: () => sbFetch("archive_summary?select=*&order=archive_date.desc"),
+  saveArchiveSummary: (data) => sbFetch("archive_summary", { method:"POST", body:JSON.stringify(data) }),
+  getUpdatesForArchive: (dateTo) => sbFetch(`job_updates?created_at=lte.${dateTo}&select=*&order=created_at.asc&limit=5000`),
+  deleteUpdatesBeforeDate: (dateTo) => sbFetch(`job_updates?created_at=lte.${encodeURIComponent(dateTo)}`, { method:"DELETE", prefer:"return=minimal" }),
   deleteUpdatesByPO: async (po) => {
     await sbFetch(`job_updates?production_number=eq.${encodeURIComponent(po)}`, { method:"DELETE", prefer:"return=minimal" });
     const jobs = await sbFetch(`jobs?production_number=eq.${encodeURIComponent(po)}&select=id`);
@@ -1425,11 +1430,11 @@ function LeadTimeReport() {
   async function load() {
     setLoading(true);
     try {
-      const [u, j] = await Promise.all([
-        db.getAllUpdatesForReport(),
+      const [r, j] = await Promise.all([
+        db.getLeadTimeReport(),
         db.getJobs()
       ]);
-      setUpdates(u || []);
+      setUpdates(r || []);
       setJobs(j || []);
     } catch(e) { console.error(e); }
     setLoading(false);
@@ -1444,74 +1449,33 @@ function LeadTimeReport() {
     }
   }, []);
 
-  // Build lookup maps from jobs table
-  const printDateByPO = {};
-  const materialByPO = {};
-  const quantityByPO = {};
-  const descByPO = {};
-  const jobIdByPO = {};
-  const poByJobId = {};
+  // Use view data directly — one row per PO from server
+  // updates here is actually the lead_time_report view result
+  // jobs is used to get current_status
+  const statusByPO = {};
+  (jobs || []).forEach(j => { statusByPO[j.production_number] = j.current_status; });
 
-  (jobs || []).forEach(j => {
-    printDateByPO[j.production_number] = j.printed_date || j.created_at;
-    materialByPO[j.production_number] = j.material_number;
-    quantityByPO[j.production_number] = j.quantity;
-    descByPO[j.production_number] = j.description;
-    jobIdByPO[j.production_number] = j.id;
-    if (j.id) poByJobId[j.id] = j.production_number;
-  });
-
-  // Group ALL updates by PO
-  // Try: production_number → job_id lookup → skip
-  const byPO = {};
-  (updates || []).forEach(u => {
-    const po = u.production_number || poByJobId[u.job_id] || null;
-    if (!po) return;
-    if (!byPO[po]) byPO[po] = [];
-    byPO[po].push({ ...u, production_number: po });
-  });
-
-  // START FROM JOBS TABLE — every job gets a row, even if no scans yet
-  const rows = (jobs || []).map(j => {
-    const po = j.production_number;
-    const scans = (byPO[po] || []).sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-
-    const firstScan = scans[0] || null;
-    const lastScan = scans[scans.length - 1] || null;
-    const latestStatus = lastScan?.status || j.current_status || "Pending";
-    const material = j.material_number || firstScan?.material_number || "";
-    const printDate = j.printed_date || j.created_at;
-
-    // QA_MFG scan
-    const qaScan = scans.find(s => s.station === "QA_MFG");
-    const qaDate = qaScan ? qaScan.created_at : null;
-
-    // Lead time
+  const rows = (updates || []).map(r => {
+    const printDate = r.printed_date || r.job_created;
+    const qaDate = r.qa_mfg_date || null;
     const startDate = printDate;
     const endDate = qaDate || new Date().toISOString();
     const diffMs = new Date(endDate) - new Date(startDate);
     const diffHrs = Math.round(diffMs / 3600000 * 10) / 10;
     const diffDays = Math.round(diffMs / 86400000 * 10) / 10;
-
-    // Machines visited in sequence
-    const machinesVisited = [];
-    scans.forEach(s => {
-      if (s.station && (machinesVisited.length === 0 || machinesVisited[machinesVisited.length - 1] !== s.station)) {
-        machinesVisited.push(s.station);
-      }
-    });
+    const latestStatus = statusByPO[r.po] || r.latest_status || "Pending";
 
     return {
-      po,
-      material,
+      po: r.po,
+      material: r.material,
       printDate,
-      firstScan: firstScan?.created_at || null,
+      firstScan: r.first_scan || null,
       qaDate,
       leadTimeHrs: diffHrs,
       leadTimeDays: diffDays,
       status: latestStatus,
-      machinesVisited: machinesVisited.join(" → "),
-      totalScans: scans.length,
+      machinesVisited: r.machines_visited || "—",
+      totalScans: parseInt(r.total_scans) || 0,
       isComplete: !!qaDate,
     };
   });
@@ -1681,6 +1645,330 @@ function LeadTimeReport() {
   );
 }
 
+// ─── ARCHIVE & CLEANUP ────────────────────────────────────────────────────
+function ArchiveCleanup({ supervisor }) {
+  const [daysOld, setDaysOld] = useState(30);
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [done, setDone] = useState(false);
+  const [summaries, setSummaries] = useState([]);
+  const [loadingSummaries, setLoadingSummaries] = useState(true);
+
+  useEffect(() => {
+    if (!window.XLSX) {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+      document.head.appendChild(s);
+    }
+    db.getArchiveSummaries().then(r => { setSummaries(r||[]); setLoadingSummaries(false); }).catch(()=>setLoadingSummaries(false));
+  }, []);
+
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+  const cutoffISO = cutoffDate.toISOString();
+  const cutoffDisplay = cutoffDate.toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" });
+
+  async function loadPreview() {
+    setLoading(true);
+    setDownloaded(false);
+    setPreview(null);
+    try {
+      const records = await db.getUpdatesForArchive(cutoffISO);
+      if (!records || records.length === 0) {
+        setPreview({ count: 0, records: [] });
+        setLoading(false);
+        return;
+      }
+      // Calculate summary stats
+      const byPO = {};
+      records.forEach(u => {
+        const po = u.production_number;
+        if (!po) return;
+        if (!byPO[po]) byPO[po] = [];
+        byPO[po].push(u);
+      });
+      const poList = Object.keys(byPO);
+      const completedPOs = poList.filter(po => byPO[po].some(u => u.station === "QA_MFG"));
+      const leadTimes = completedPOs.map(po => {
+        const scans = byPO[po].sort((a,b) => new Date(a.created_at)-new Date(b.created_at));
+        const first = new Date(scans[0].created_at);
+        const qa = scans.find(s => s.station === "QA_MFG");
+        return (new Date(qa.created_at) - first) / 86400000;
+      }).filter(d => d > 0);
+      const avgLT = leadTimes.length ? Math.round(leadTimes.reduce((a,b)=>a+b,0)/leadTimes.length*10)/10 : 0;
+      const minLT = leadTimes.length ? Math.round(Math.min(...leadTimes)*10)/10 : 0;
+      const maxLT = leadTimes.length ? Math.round(Math.max(...leadTimes)*10)/10 : 0;
+      setPreview({
+        count: records.length,
+        records,
+        poCount: poList.length,
+        completedCount: completedPOs.length,
+        avgLT, minLT, maxLT,
+        dateFrom: records[0].created_at,
+        dateTo: records[records.length-1].created_at,
+      });
+    } catch(e) { alert("Preview failed: " + e.message); }
+    setLoading(false);
+  }
+
+  function fmtDate(d) {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+  }
+  function fmtDT(d) {
+    if (!d) return "—";
+    return new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  }
+
+  async function downloadAndPrepare() {
+    if (!window.XLSX || !preview?.records?.length) return;
+    const wb = window.XLSX.utils.book_new();
+
+    // Sheet 1 — Raw Job Updates
+    const updateHeaders = ["PO No","Material No","Description","Quantity","Station","Status","Supervisor","Date & Time","Is Deviation","Unknown Machine"];
+    const updateRows = preview.records.map(u => [
+      u.production_number||"", u.material_number||"", u.description||"", u.quantity||"",
+      u.station||"", u.status||"", u.supervisor||"", fmtDT(u.created_at),
+      u.is_deviation?"YES":"NO", u.unknown_machine?"YES":"NO"
+    ]);
+    const ws1 = window.XLSX.utils.aoa_to_sheet([updateHeaders, ...updateRows]);
+    ws1["!cols"] = [14,14,20,8,12,10,12,18,8,8].map(w=>({wch:w}));
+    window.XLSX.utils.book_append_sheet(wb, ws1, "Job Updates");
+
+    // Sheet 2 — Lead Time Summary per PO
+    const byPO = {};
+    preview.records.forEach(u => {
+      const po = u.production_number; if (!po) return;
+      if (!byPO[po]) byPO[po] = [];
+      byPO[po].push(u);
+    });
+    const ltHeaders = ["PO No","Material No","First Scan","Last Scan","QA_MFG Date","Lead Time (Days)","Lead Time (Hours)","Total Scans","Machines Visited","Final Status"];
+    const ltRows = Object.entries(byPO).map(([po, scans]) => {
+      const sorted = scans.sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+      const first = sorted[0];
+      const last = sorted[sorted.length-1];
+      const qa = sorted.find(s=>s.station==="QA_MFG");
+      const diffMs = qa ? new Date(qa.created_at)-new Date(first.created_at) : new Date(last.created_at)-new Date(first.created_at);
+      const days = Math.round(diffMs/86400000*10)/10;
+      const hrs = Math.round(diffMs/3600000*10)/10;
+      const machines = [];
+      sorted.forEach(s=>{ if(s.station&&(machines.length===0||machines[machines.length-1]!==s.station)) machines.push(s.station); });
+      return [po, first.material_number||"", fmtDT(first.created_at), fmtDT(last.created_at), fmtDT(qa?.created_at), days, hrs, sorted.length, machines.join(" → "), last.status||""];
+    });
+    const ws2 = window.XLSX.utils.aoa_to_sheet([ltHeaders, ...ltRows]);
+    ws2["!cols"] = [14,14,18,18,18,12,12,8,40,10].map(w=>({wch:w}));
+    window.XLSX.utils.book_append_sheet(wb, ws2, "Lead Time Summary");
+
+    // Sheet 3 — Archive Summary Stats
+    const statsHeaders = ["Metric","Value"];
+    const statsData = [
+      statsHeaders,
+      ["Archive Date", fmtDate(new Date().toISOString())],
+      ["Records Archived", preview.count],
+      ["Date Range From", fmtDT(preview.dateFrom)],
+      ["Date Range To", fmtDT(preview.dateTo)],
+      ["Total POs", preview.poCount],
+      ["Completed POs", preview.completedCount],
+      ["In Progress POs", preview.poCount - preview.completedCount],
+      ["Avg Lead Time (days)", preview.avgLT],
+      ["Min Lead Time (days)", preview.minLT],
+      ["Max Lead Time (days)", preview.maxLT],
+      ["Archived By", supervisor||"Admin"],
+    ];
+    const ws3 = window.XLSX.utils.aoa_to_sheet(statsData);
+    ws3["!cols"] = [{wch:25},{wch:20}];
+    window.XLSX.utils.book_append_sheet(wb, ws3, "Archive Stats");
+
+    const filename = `shoptrack_archive_${new Date().toISOString().slice(0,10)}.xlsx`;
+    window.XLSX.writeFile(wb, filename);
+    setDownloaded(true);
+  }
+
+  async function deleteAndArchive() {
+    if (!downloaded || !preview?.count) return;
+    if (!window.confirm(`FINAL CONFIRMATION:\n\nThis will permanently delete ${preview.count} scan records older than ${daysOld} days from the database.\n\nMake sure you have saved the downloaded Excel file!\n\nClick OK to proceed.`)) return;
+    setArchiving(true);
+    try {
+      // Save summary to archive_summary table
+      await db.saveArchiveSummary({
+        archive_date: new Date().toISOString().slice(0,10),
+        date_from: preview.dateFrom?.slice(0,10),
+        date_to: preview.dateTo?.slice(0,10),
+        total_jobs: preview.poCount,
+        completed_jobs: preview.completedCount,
+        in_progress_jobs: preview.poCount - preview.completedCount,
+        avg_lead_time_days: preview.avgLT,
+        min_lead_time_days: preview.minLT,
+        max_lead_time_days: preview.maxLT,
+        total_scans: preview.count,
+        archived_by: supervisor||"Admin",
+      });
+      // Delete old records
+      await db.deleteUpdatesBeforeDate(cutoffISO);
+      setDone(true);
+      // Reload summaries
+      const s = await db.getArchiveSummaries();
+      setSummaries(s||[]);
+    } catch(e) { alert("Archive failed: " + e.message); }
+    setArchiving(false);
+  }
+
+  return (
+    <div style={{ padding:16 }}>
+      <div style={S.sectionTitle}>ARCHIVE & CLEANUP</div>
+
+      {/* Archive form */}
+      <div style={{ ...S.card, marginBottom:16 }}>
+        <div style={{ fontFamily:"monospace", fontSize:11, color:"#888", marginBottom:14, fontWeight:700 }}>
+          STEP 1 — SELECT CUTOFF DATE
+        </div>
+        <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap", marginBottom:12 }}>
+          <div>
+            <label style={S.label}>Archive records older than</label>
+            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+              <select
+                style={{ ...S.select, width:120 }}
+                value={daysOld}
+                onChange={e=>{ setDaysOld(Number(e.target.value)); setPreview(null); setDownloaded(false); setDone(false); }}
+              >
+                {[15,30,45,60,90,180].map(d=><option key={d} value={d}>{d} days</option>)}
+              </select>
+              <span style={{ fontFamily:"monospace", fontSize:11, color:"#888" }}>
+                → delete records before <span style={{ color:"#ef4444", fontWeight:700 }}>{cutoffDisplay}</span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <button style={{ ...S.btn("ghost"), fontSize:11 }} onClick={loadPreview} disabled={loading}>
+          {loading ? "LOADING PREVIEW..." : "PREVIEW RECORDS TO ARCHIVE"}
+        </button>
+      </div>
+
+      {/* Preview */}
+      {preview && (
+        <div style={{ ...S.card, marginBottom:16 }}>
+          <div style={{ fontFamily:"monospace", fontSize:11, color:"#888", marginBottom:14, fontWeight:700 }}>
+            STEP 2 — PREVIEW & DOWNLOAD
+          </div>
+
+          {preview.count === 0 ? (
+            <div style={{ fontFamily:"monospace", fontSize:12, color:"#22c55e" }}>
+              ✓ No records older than {daysOld} days. Nothing to archive.
+            </div>
+          ) : (
+            <>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:14 }}>
+                {[
+                  ["Scan Records", preview.count, "#d4a853"],
+                  ["Total POs", preview.poCount, "#3b82f6"],
+                  ["Completed", preview.completedCount, "#22c55e"],
+                ].map(([l,v,c])=>(
+                  <div key={l} style={{ background:"#111", border:"1px solid #2a2a2a", borderRadius:6, padding:"10px 12px" }}>
+                    <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase" }}>{l}</div>
+                    <div style={{ fontFamily:"monospace", fontSize:22, fontWeight:700, color:c }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:14 }}>
+                {[
+                  ["Avg Lead Time", preview.avgLT + " days"],
+                  ["Min Lead Time", preview.minLT + " days"],
+                  ["Max Lead Time", preview.maxLT + " days"],
+                ].map(([l,v])=>(
+                  <div key={l} style={{ background:"#111", border:"1px solid #2a2a2a", borderRadius:6, padding:"8px 12px" }}>
+                    <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase" }}>{l}</div>
+                    <div style={{ fontFamily:"monospace", fontSize:14, fontWeight:700, color:"#d4a853" }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontFamily:"monospace", fontSize:10, color:"#555", marginBottom:14 }}>
+                Date range: {fmtDT(preview.dateFrom)} → {fmtDT(preview.dateTo)}
+              </div>
+
+              <button
+                style={{ ...S.btn("primary"), width:"100%", padding:"12px", marginBottom:8 }}
+                onClick={downloadAndPrepare}
+              >
+                {downloaded ? "✓ DOWNLOADED — RE-DOWNLOAD" : "⬇ DOWNLOAD ARCHIVE EXCEL (3 SHEETS)"}
+              </button>
+
+              {downloaded && (
+                <div style={{ background:"#14532d33", border:"1px solid #22c55e44", borderRadius:4, padding:"8px 12px", marginBottom:10, fontFamily:"monospace", fontSize:11, color:"#22c55e" }}>
+                  ✓ Excel saved! Contains: Job Updates + Lead Time Summary + Archive Stats
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Delete step */}
+      {downloaded && preview?.count > 0 && !done && (
+        <div style={{ ...S.card, marginBottom:16, borderColor:"#ef444444" }}>
+          <div style={{ fontFamily:"monospace", fontSize:11, color:"#ef4444", marginBottom:10, fontWeight:700 }}>
+            STEP 3 — DELETE OLD RECORDS
+          </div>
+          <div style={{ fontFamily:"monospace", fontSize:11, color:"#888", marginBottom:14 }}>
+            This will permanently delete <span style={{ color:"#ef4444", fontWeight:700 }}>{preview.count} scan records</span> older than {daysOld} days.
+            A summary will be saved to the archive log below.
+          </div>
+          <div style={{ ...S.warn, marginBottom:14 }}>
+            ⚠ Make sure your Excel file is saved before proceeding. This cannot be undone.
+          </div>
+          <button
+            style={{ ...S.btn("primary"), width:"100%", padding:"12px", background:"#7f1d1d", fontSize:12 }}
+            onClick={deleteAndArchive}
+            disabled={archiving}
+          >
+            {archiving ? "ARCHIVING..." : `DELETE ${preview.count} RECORDS FROM DATABASE`}
+          </button>
+        </div>
+      )}
+
+      {done && (
+        <div style={{ ...S.card, marginBottom:16, borderColor:"#22c55e44", textAlign:"center", padding:24 }}>
+          <div style={{ fontSize:32, marginBottom:8 }}>✓</div>
+          <div style={{ fontFamily:"monospace", fontSize:13, fontWeight:700, color:"#22c55e" }}>ARCHIVE COMPLETE</div>
+          <div style={{ fontFamily:"monospace", fontSize:11, color:"#888", marginTop:6 }}>
+            {preview.count} records deleted · Summary saved to archive log
+          </div>
+        </div>
+      )}
+
+      {/* Archive History */}
+      <div style={{ ...S.card }}>
+        <div style={{ ...S.sectionTitle }}>ARCHIVE HISTORY</div>
+        {loadingSummaries && <div style={{ fontFamily:"monospace", fontSize:11, color:"#555" }}>Loading...</div>}
+        {!loadingSummaries && summaries.length === 0 && (
+          <div style={{ fontFamily:"monospace", fontSize:11, color:"#444" }}>No archives yet</div>
+        )}
+        {summaries.map((s,i) => (
+          <div key={s.id} style={{ borderBottom:"1px solid #1a1a1a", padding:"10px 0", display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:8 }}>
+            <div>
+              <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase" }}>Archive Date</div>
+              <div style={{ fontFamily:"monospace", fontSize:12, fontWeight:700, color:"#d4a853" }}>{fmtDate(s.archive_date)}</div>
+            </div>
+            <div>
+              <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase" }}>Period</div>
+              <div style={{ fontFamily:"monospace", fontSize:11, color:"#aaa" }}>{fmtDate(s.date_from)} → {fmtDate(s.date_to)}</div>
+            </div>
+            <div>
+              <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase" }}>Jobs / Scans</div>
+              <div style={{ fontFamily:"monospace", fontSize:11, color:"#e8e2d4" }}>{s.total_jobs} POs · {s.total_scans} scans</div>
+            </div>
+            <div>
+              <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase" }}>Avg Lead Time</div>
+              <div style={{ fontFamily:"monospace", fontSize:11, color:"#22c55e" }}>{s.avg_lead_time_days} days</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── ROOT APP ──────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("log");
@@ -1725,6 +2013,7 @@ export default function App() {
     { id:"library", label:"LABEL LIBRARY" },
     { id:"status",  label:"JOB STATUS" },
     { id:"report",  label:"LEAD TIME" },
+    { id:"archive", label:"ARCHIVE" },
     { id:"import",  label:"IMPORT" },
     { id:"setup",   label:"SETUP" },
   ];
@@ -1750,6 +2039,7 @@ export default function App() {
       {page==="status" && <JobStatus />}
       {page==="library" && <LabelLibrary />}
       {page==="report"  && <LeadTimeReport />}
+      {page==="archive" && <ArchiveCleanup supervisor={supervisor} />}
       {page==="import" && <BulkImport />}
       {page==="setup"  && <SetupPage stations={stations} supervisors={supervisors} onUpdate={(wc,sup)=>{ setStations(wc); setSupervisors(sup); }} />}
     </div>
