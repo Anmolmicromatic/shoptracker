@@ -28,12 +28,12 @@ async function sbFetch(path, opts = {}) {
 }
 
 const db = {
-  getJobs: () => sbFetch("jobs?select=*&order=created_at.desc"),
+  getJobs: () => sbFetch("jobs?select=*&order=created_at.desc&limit=5000"),
   getJob: async (prodNo) => { const r = await sbFetch(`jobs?production_number=eq.${encodeURIComponent(prodNo.trim())}&select=*`); return r?.[0]; },
   createJob: (job) => sbFetch("jobs", { method:"POST", body:JSON.stringify(job) }),
   updateJob: (id, patch) => sbFetch(`jobs?id=eq.${id}`, { method:"PATCH", body:JSON.stringify(patch), prefer:"return=representation" }),
   addUpdate: (u) => sbFetch("job_updates", { method:"POST", body:JSON.stringify(u) }),
-  getAllUpdates: () => sbFetch("job_updates?select=*&order=created_at.desc&limit=500"),
+  getAllUpdates: () => sbFetch("job_updates?select=*&order=created_at.desc&limit=5000"),
   bulkInsertPO: (rows) => sbFetch("production_orders", { method:"POST", body:JSON.stringify(rows), prefer:"return=minimal" }),
   bulkInsertRouting: (rows) => sbFetch("routing_master", { method:"POST", body:JSON.stringify(rows), prefer:"return=minimal" }),
   getSettings: () => sbFetch("app_settings?select=*"),
@@ -42,9 +42,9 @@ const db = {
     return sbFetch("app_settings", { method:"POST", body:JSON.stringify({ key, value:JSON.stringify(value) }) });
   },
   deleteUpdate: (id) => sbFetch(`job_updates?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
-  getLibrary: () => sbFetch("jobs?select=production_number,material_number,quantity,description&order=created_at.desc&limit=1000"),
+  getLibrary: () => sbFetch("jobs?select=production_number,material_number,quantity,description&order=created_at.desc&limit=5000"),
   deleteJob: (id) => sbFetch(`jobs?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
-  getAllUpdatesForReport: () => sbFetch("job_updates?select=production_number,material_number,station,status,supervisor,created_at,job_id&order=created_at.asc&limit=5000"),
+  getAllUpdatesForReport: () => sbFetch("job_updates?select=production_number,material_number,station,status,supervisor,created_at,job_id&order=created_at.asc&limit=20000"),
   deleteUpdatesByPO: async (po) => {
     await sbFetch(`job_updates?production_number=eq.${encodeURIComponent(po)}`, { method:"DELETE", prefer:"return=minimal" });
     const jobs = await sbFetch(`jobs?production_number=eq.${encodeURIComponent(po)}&select=id`);
