@@ -1444,19 +1444,25 @@ function LeadTimeReport() {
     }
   }, []);
 
-  // Build print date lookup from jobs table
+  // Build lookup maps from jobs table
   const printDateByPO = {};
   const materialByPO = {};
+  const quantityByPO = {};
+  const descByPO = {};
+  const jobIdByPO = {};
+  const poByJobId = {};
+
   (jobs || []).forEach(j => {
     printDateByPO[j.production_number] = j.printed_date || j.created_at;
     materialByPO[j.production_number] = j.material_number;
+    quantityByPO[j.production_number] = j.quantity;
+    descByPO[j.production_number] = j.description;
+    jobIdByPO[j.production_number] = j.id;
+    if (j.id) poByJobId[j.id] = j.production_number;
   });
 
-  // Build job_id → production_number lookup from jobs table
-  const poByJobId = {};
-  (jobs || []).forEach(j => { if (j.id) poByJobId[j.id] = j.production_number; });
-
-  // Group updates by PO — use job_id as fallback if production_number is null
+  // Group ALL updates by PO
+  // Try: production_number → job_id lookup → skip
   const byPO = {};
   (updates || []).forEach(u => {
     const po = u.production_number || poByJobId[u.job_id] || null;
@@ -1465,31 +1471,31 @@ function LeadTimeReport() {
     byPO[po].push({ ...u, production_number: po });
   });
 
-  // Build report rows
-  const rows = Object.entries(byPO).map(([po, scans]) => {
-    // Sort scans by time
-    const sorted = [...scans].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  // START FROM JOBS TABLE — every job gets a row, even if no scans yet
+  const rows = (jobs || []).map(j => {
+    const po = j.production_number;
+    const scans = (byPO[po] || []).sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
 
-    const firstScan = sorted[0];
-    const lastScan = sorted[sorted.length - 1];
-    const latestStatus = lastScan.status;
-    const material = firstScan.material_number || materialByPO[po] || "";
-    const printDate = printDateByPO[po] || null;
+    const firstScan = scans[0] || null;
+    const lastScan = scans[scans.length - 1] || null;
+    const latestStatus = lastScan?.status || j.current_status || "Pending";
+    const material = j.material_number || firstScan?.material_number || "";
+    const printDate = j.printed_date || j.created_at;
 
     // QA_MFG scan
-    const qaScan = sorted.find(s => s.station === "QA_MFG");
+    const qaScan = scans.find(s => s.station === "QA_MFG");
     const qaDate = qaScan ? qaScan.created_at : null;
 
-    // Lead time calculation
-    const startDate = printDate || firstScan.created_at;
+    // Lead time
+    const startDate = printDate;
     const endDate = qaDate || new Date().toISOString();
     const diffMs = new Date(endDate) - new Date(startDate);
     const diffHrs = Math.round(diffMs / 3600000 * 10) / 10;
     const diffDays = Math.round(diffMs / 86400000 * 10) / 10;
 
-    // Machines visited in order (deduplicated but keeping sequence)
+    // Machines visited in sequence
     const machinesVisited = [];
-    sorted.forEach(s => {
+    scans.forEach(s => {
       if (s.station && (machinesVisited.length === 0 || machinesVisited[machinesVisited.length - 1] !== s.station)) {
         machinesVisited.push(s.station);
       }
@@ -1499,13 +1505,13 @@ function LeadTimeReport() {
       po,
       material,
       printDate,
-      firstScan: firstScan.created_at,
+      firstScan: firstScan?.created_at || null,
       qaDate,
       leadTimeHrs: diffHrs,
       leadTimeDays: diffDays,
       status: latestStatus,
       machinesVisited: machinesVisited.join(" → "),
-      totalScans: sorted.length,
+      totalScans: scans.length,
       isComplete: !!qaDate,
     };
   });
