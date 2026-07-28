@@ -44,6 +44,7 @@ const db = {
   deleteUpdate: (id) => sbFetch(`job_updates?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
   getLibrary: () => sbFetch("jobs?select=production_number,material_number,quantity,description&order=created_at.desc&limit=1000"),
   deleteJob: (id) => sbFetch(`jobs?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
+  getAllUpdatesForReport: () => sbFetch("job_updates?select=production_number,material_number,station,status,supervisor,created_at&order=created_at.asc&limit=5000"),
   deleteUpdatesByPO: async (po) => {
     await sbFetch(`job_updates?production_number=eq.${encodeURIComponent(po)}`, { method:"DELETE", prefer:"return=minimal" });
     const jobs = await sbFetch(`jobs?production_number=eq.${encodeURIComponent(po)}&select=id`);
@@ -1411,6 +1412,265 @@ function LabelLibrary() {
   );
 }
 
+// ─── LEAD TIME REPORT ─────────────────────────────────────────────────────
+function LeadTimeReport() {
+  const [updates, setUpdates] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  async function load() {
+    setLoading(true);
+    try {
+      const [u, j] = await Promise.all([
+        db.getAllUpdatesForReport(),
+        db.getJobs()
+      ]);
+      setUpdates(u || []);
+      setJobs(j || []);
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (!window.XLSX) {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+      document.head.appendChild(s);
+    }
+  }, []);
+
+  // Build print date lookup from jobs table
+  const printDateByPO = {};
+  const materialByPO = {};
+  (jobs || []).forEach(j => {
+    printDateByPO[j.production_number] = j.printed_date || j.created_at;
+    materialByPO[j.production_number] = j.material_number;
+  });
+
+  // Group updates by PO
+  const byPO = {};
+  (updates || []).forEach(u => {
+    const po = u.production_number;
+    if (!po) return;
+    if (!byPO[po]) byPO[po] = [];
+    byPO[po].push(u);
+  });
+
+  // Build report rows
+  const rows = Object.entries(byPO).map(([po, scans]) => {
+    // Sort scans by time
+    const sorted = [...scans].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    const firstScan = sorted[0];
+    const lastScan = sorted[sorted.length - 1];
+    const latestStatus = lastScan.status;
+    const material = firstScan.material_number || materialByPO[po] || "";
+    const printDate = printDateByPO[po] || null;
+
+    // QA_MFG scan
+    const qaScan = sorted.find(s => s.station === "QA_MFG");
+    const qaDate = qaScan ? qaScan.created_at : null;
+
+    // Lead time calculation
+    const startDate = printDate || firstScan.created_at;
+    const endDate = qaDate || new Date().toISOString();
+    const diffMs = new Date(endDate) - new Date(startDate);
+    const diffHrs = Math.round(diffMs / 3600000 * 10) / 10;
+    const diffDays = Math.round(diffMs / 86400000 * 10) / 10;
+
+    // Machines visited in order (deduplicated but keeping sequence)
+    const machinesVisited = [];
+    sorted.forEach(s => {
+      if (s.station && (machinesVisited.length === 0 || machinesVisited[machinesVisited.length - 1] !== s.station)) {
+        machinesVisited.push(s.station);
+      }
+    });
+
+    return {
+      po,
+      material,
+      printDate,
+      firstScan: firstScan.created_at,
+      qaDate,
+      leadTimeHrs: diffHrs,
+      leadTimeDays: diffDays,
+      status: latestStatus,
+      machinesVisited: machinesVisited.join(" → "),
+      totalScans: sorted.length,
+      isComplete: !!qaDate,
+    };
+  });
+
+  // Apply filters
+  let filtered = rows;
+  if (search) {
+    const s = search.toLowerCase();
+    filtered = filtered.filter(r =>
+      r.po?.toLowerCase().includes(s) ||
+      r.material?.toLowerCase().includes(s)
+    );
+  }
+  if (filterStatus !== "All") {
+    if (filterStatus === "Completed") filtered = filtered.filter(r => r.isComplete);
+    else if (filterStatus === "In Progress") filtered = filtered.filter(r => !r.isComplete);
+    else filtered = filtered.filter(r => r.status === filterStatus);
+  }
+  if (dateFrom) filtered = filtered.filter(r => r.printDate && new Date(r.printDate) >= new Date(dateFrom));
+  if (dateTo) filtered = filtered.filter(r => r.printDate && new Date(r.printDate) <= new Date(dateTo + "T23:59:59"));
+
+  // Sort: completed first by qaDate desc, then in-progress by firstScan desc
+  filtered.sort((a, b) => {
+    if (a.isComplete && !b.isComplete) return -1;
+    if (!a.isComplete && b.isComplete) return 1;
+    const aDate = a.qaDate || a.firstScan;
+    const bDate = b.qaDate || b.firstScan;
+    return new Date(bDate) - new Date(aDate);
+  });
+
+  function fmtDate(d) {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" });
+  }
+  function fmtDateTime(d) {
+    if (!d) return "—";
+    return new Date(d).toLocaleString("en-IN", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" });
+  }
+
+  const completedCount = rows.filter(r => r.isComplete).length;
+  const inProgressCount = rows.filter(r => !r.isComplete).length;
+  const avgLeadTime = completedCount > 0
+    ? Math.round(rows.filter(r => r.isComplete).reduce((s, r) => s + r.leadTimeDays, 0) / completedCount * 10) / 10
+    : 0;
+
+  function exportExcel() {
+    if (!window.XLSX) { alert("Try again in a moment"); return; }
+    const headers = ["PO No","Material No","Print Date","First Scan","QA_MFG Date","Lead Time (Days)","Lead Time (Hours)","Status","Machines Visited","Total Scans","Complete?"];
+    const data = [headers, ...filtered.map(r => [
+      r.po, r.material, fmtDate(r.printDate), fmtDateTime(r.firstScan),
+      fmtDateTime(r.qaDate), r.leadTimeDays, r.leadTimeHrs,
+      r.status, r.machinesVisited, r.totalScans, r.isComplete ? "YES" : "In Progress"
+    ])];
+    const ws = window.XLSX.utils.aoa_to_sheet(data);
+    ws["!cols"] = [14,14,12,16,16,12,12,10,40,8,10].map(w=>({wch:w}));
+    const wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, "Lead Time Report");
+    window.XLSX.writeFile(wb, `lead_time_report_${new Date().toISOString().slice(0,10)}.xlsx`);
+  }
+
+  return (
+    <div style={{ padding:16 }}>
+
+      {/* Stats */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:14 }}>
+        {[
+          ["TOTAL JOBS", rows.length, "#d4a853"],
+          ["COMPLETED", completedCount, "#22c55e"],
+          ["IN PROGRESS", inProgressCount, "#3b82f6"],
+        ].map(([l,v,c]) => (
+          <div key={l} style={{ ...S.card, padding:"10px 12px" }}>
+            <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase" }}>{l}</div>
+            <div style={{ fontFamily:"monospace", fontSize:22, fontWeight:700, color:c }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Avg lead time */}
+      {completedCount > 0 && (
+        <div style={{ ...S.card, marginBottom:14, padding:"10px 16px", display:"flex", alignItems:"center", gap:16 }}>
+          <div>
+            <div style={{ fontFamily:"monospace", fontSize:9, color:"#555", textTransform:"uppercase" }}>Avg Lead Time (Completed Jobs)</div>
+            <div style={{ fontFamily:"monospace", fontSize:20, fontWeight:700, color:"#d4a853" }}>{avgLeadTime} days</div>
+          </div>
+          <div style={{ fontFamily:"monospace", fontSize:10, color:"#444", borderLeft:"1px solid #2a2a2a", paddingLeft:16 }}>
+            Print Date → QA_MFG scan
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+        <input style={S.input} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search PO or Material..." />
+        <div style={{ display:"flex", gap:6 }}>
+          <input style={{ ...S.input, flex:1 }} type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} />
+          <input style={{ ...S.input, flex:1 }} type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} />
+        </div>
+      </div>
+
+      {/* Status filter */}
+      <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:12 }}>
+        {["All","Completed","In Progress",...STATUSES].map(s => (
+          <button key={s} style={S.tab(filterStatus===s)} onClick={()=>setFilterStatus(s)}>{s}</button>
+        ))}
+      </div>
+
+      {/* Actions */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+        <span style={{ fontFamily:"monospace", fontSize:11, color:"#555" }}>
+          {filtered.length} jobs · <span style={{ cursor:"pointer", color:"#d4a853" }} onClick={load}>↻ refresh</span>
+        </span>
+        <button style={{ ...S.btn("success"), padding:"7px 14px", fontSize:11 }} onClick={exportExcel}>
+          ⬇ EXPORT EXCEL
+        </button>
+      </div>
+
+      {loading && <div style={{ textAlign:"center", color:"#555", fontFamily:"monospace", padding:32 }}>LOADING...</div>}
+
+      {!loading && (
+        <div style={{ overflowX:"auto", border:"1px solid #2a2a2a", borderRadius:6 }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"monospace", fontSize:11, minWidth:900 }}>
+            <thead>
+              <tr style={{ background:"#111" }}>
+                {["PO No","Material","Print Date","First Scan","QA_MFG Date","Lead Time","Status","Machines Visited","Scans"].map(h => (
+                  <th key={h} style={{ padding:"9px 12px", textAlign:"left", color:"#555", fontWeight:700, borderBottom:"1px solid #2a2a2a", fontSize:10, whiteSpace:"nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr><td colSpan={9} style={{ padding:32, textAlign:"center", color:"#444" }}>No records found</td></tr>
+              )}
+              {filtered.map((r, i) => (
+                <tr key={r.po} style={{ borderBottom:"1px solid #1a1a1a", background:i%2===0?"transparent":"#0d0d0d" }}>
+                  <td style={{ padding:"8px 12px", color:"#d4a853", fontWeight:700 }}>{r.po}</td>
+                  <td style={{ padding:"8px 12px", color:"#e8e2d4" }}>{r.material}</td>
+                  <td style={{ padding:"8px 12px", color:"#888", whiteSpace:"nowrap" }}>{fmtDate(r.printDate)}</td>
+                  <td style={{ padding:"8px 12px", color:"#888", whiteSpace:"nowrap" }}>{fmtDateTime(r.firstScan)}</td>
+                  <td style={{ padding:"8px 12px", whiteSpace:"nowrap" }}>
+                    {r.qaDate
+                      ? <span style={{ color:"#22c55e" }}>{fmtDateTime(r.qaDate)}</span>
+                      : <span style={{ color:"#f59e0b" }}>In Progress</span>
+                    }
+                  </td>
+                  <td style={{ padding:"8px 12px", whiteSpace:"nowrap" }}>
+                    <div style={{ color: r.isComplete ? "#22c55e" : "#f59e0b", fontWeight:700 }}>{r.leadTimeDays}d</div>
+                    <div style={{ color:"#555", fontSize:10 }}>{r.leadTimeHrs}h</div>
+                  </td>
+                  <td style={{ padding:"8px 12px" }}>
+                    <span style={S.statusPill(r.status)}>{r.status}</span>
+                  </td>
+                  <td style={{ padding:"8px 12px", color:"#aaa", maxWidth:220, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontSize:10 }}>
+                    {r.machinesVisited || "—"}
+                  </td>
+                  <td style={{ padding:"8px 12px", color:"#888", textAlign:"center" }}>{r.totalScans}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ fontFamily:"monospace", fontSize:10, color:"#333", marginTop:8 }}>
+        Lead time = Print Date → QA_MFG scan date · In Progress = Print Date → Today
+      </div>
+    </div>
+  );
+}
+
 // ─── ROOT APP ──────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("log");
@@ -1454,6 +1714,7 @@ export default function App() {
     { id:"labels",  label:"PRINT LABELS" },
     { id:"library", label:"LABEL LIBRARY" },
     { id:"status",  label:"JOB STATUS" },
+    { id:"report",  label:"LEAD TIME" },
     { id:"import",  label:"IMPORT" },
     { id:"setup",   label:"SETUP" },
   ];
@@ -1478,6 +1739,7 @@ export default function App() {
       {page==="labels" && <PrintLabels />}
       {page==="status" && <JobStatus />}
       {page==="library" && <LabelLibrary />}
+      {page==="report"  && <LeadTimeReport />}
       {page==="import" && <BulkImport />}
       {page==="setup"  && <SetupPage stations={stations} supervisors={supervisors} onUpdate={(wc,sup)=>{ setStations(wc); setSupervisors(sup); }} />}
     </div>
