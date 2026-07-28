@@ -44,7 +44,7 @@ const db = {
   deleteUpdate: (id) => sbFetch(`job_updates?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
   getLibrary: () => sbFetch("jobs?select=production_number,material_number,quantity,description&order=created_at.desc&limit=1000"),
   deleteJob: (id) => sbFetch(`jobs?id=eq.${id}`, { method:"DELETE", prefer:"return=minimal" }),
-  getAllUpdatesForReport: () => sbFetch("job_updates?select=production_number,material_number,station,status,supervisor,created_at&order=created_at.asc&limit=5000"),
+  getAllUpdatesForReport: () => sbFetch("job_updates?select=production_number,material_number,station,status,supervisor,created_at,job_id&order=created_at.asc&limit=5000"),
   deleteUpdatesByPO: async (po) => {
     await sbFetch(`job_updates?production_number=eq.${encodeURIComponent(po)}`, { method:"DELETE", prefer:"return=minimal" });
     const jobs = await sbFetch(`jobs?production_number=eq.${encodeURIComponent(po)}&select=id`);
@@ -1452,13 +1452,17 @@ function LeadTimeReport() {
     materialByPO[j.production_number] = j.material_number;
   });
 
-  // Group updates by PO
+  // Build job_id → production_number lookup from jobs table
+  const poByJobId = {};
+  (jobs || []).forEach(j => { if (j.id) poByJobId[j.id] = j.production_number; });
+
+  // Group updates by PO — use job_id as fallback if production_number is null
   const byPO = {};
   (updates || []).forEach(u => {
-    const po = u.production_number;
+    const po = u.production_number || poByJobId[u.job_id] || null;
     if (!po) return;
     if (!byPO[po]) byPO[po] = [];
-    byPO[po].push(u);
+    byPO[po].push({ ...u, production_number: po });
   });
 
   // Build report rows
